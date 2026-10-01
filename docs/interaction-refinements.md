@@ -61,3 +61,4 @@
 - 实际 Windows BAT 分支在独立夹具中通过：只构建不启动、重复 START 复用、源码变化自动构建、强制重建和 standalone 静态资源复制；实际应用生产构建及启动另在 3037 验证。未重建或停止用户现有 3000／3001 服务。
 - 按 local-review 检查当前发布差异，关注／历史状态、异步取消、重试周期、持久化、设置与构建入口未发现待修的阻断问题。测试生成的 Next 类型目录引用已恢复，不提交测试缓存或构建产物。
 - Git 远程已将 Masaicker/uni-live 设为 origin，qianjiachun/uni-live 保留为 upstream；本轮提交后向 origin/main 普通推送。
+- 发布完成：功能提交 `97c13e9` 已成功推送至 `Masaicker/uni-live` 的 `main`，本地 `main` 跟踪 `origin/main`。独立 3037 验证服务已停止；生产服务下次运行 START 会按源码指纹自动判断是否重建。
