@@ -1,5 +1,7 @@
 import axios from "axios";
-import type { IQnType, IStreamType } from "@/types";
+import type { IQnType, IStreamType, PlaybackResult } from "@/types";
+import { chooseDouyuQuality, describeDouyuPlayback, parseDouyuQualities } from "./quality";
+import { getDouyuDartPlayback } from "./dart-playback";
 
 export const QN_DOUYU: Record<IQnType, string> = {
   原画: "0",
@@ -166,6 +168,8 @@ function getDouyuRealLiveAuth(
 export function getRealLive_DouyuScript(rid: string): Promise<string> {
   return new Promise((resolve, reject) => {
     axios.get("https://www.douyu.com/" + rid, {
+      proxy: false,
+      timeout: 15000,
     })
       .then((ret) => {
         let ub9 = "";
@@ -181,56 +185,82 @@ export function getRealLive_DouyuScript(rid: string): Promise<string> {
   });
 }
 
-export function getRealLive_Douyu(
+async function getV1Playback(
   rid: string,
   qn: IQnType,
-  type: IStreamType
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const did = "10000000000000000000000000001501";
-    axios.get(`https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption?did=${did}`, {
-      headers: {
-        Referer: `https://www.douyu.com/${rid}`,
-      },
-    }).then((encRes) => {
-      const encRet = encRes.data;
-      if (!encRet || encRet.error !== 0) {
-        resolve("");
-        return;
-      }
-      const d = encRet.data;
-      const ts = Math.round(Date.now() / 1000);
-      const auth = getDouyuRealLiveAuth(rid, did, ts, d.key, d.rand_str, d.enc_time, d.is_special);
-      const rate = QN_DOUYU[qn] === "1428" ? "-1" : QN_DOUYU[qn];
-      const postData = new URLSearchParams({
-        enc_data: d.enc_data,
-        tt: String(ts),
-        did,
-        auth,
-        cdn: "",
-        rate,
-        hevc: "0",
-        fa: "0",
-        ive: "0",
-      }).toString();
-
-      axios.post(`https://www.douyu.com/lapi/live/getH5PlayV1/${rid}`, postData, {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Referer: `https://www.douyu.com/${rid}`,
-        },
-      }).then((res) => {
-        const ret = res.data;
-        let realLive = "";
-        if (ret?.error === 0) {
-          if (type === "hls" && ret.data?.hls_url && ret.data?.hls_live) {
-            realLive = `${ret.data.hls_url}/${ret.data.hls_live}`;
-          } else {
-            realLive = `${ret.data.rtmp_url}/${ret.data.rtmp_live}`;
-          }
-        }
-        resolve(realLive);
-      }).catch(reject);
-    }).catch(reject);
+  type: IStreamType,
+  cookie = "",
+  selectedRate?: number
+): Promise<PlaybackResult> {
+  const did = "10000000000000000000000000001501";
+  const headers = {
+    Referer: `https://www.douyu.com/${rid}`,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    ...(cookie ? { Cookie: cookie } : {}),
+  };
+  const encRes = await axios.get(`https://www.douyu.com/wgapi/livenc/liveweb/websec/getEncryption?did=${did}`, {
+    // 直连斗鱼，避免环境代理将 HTTPS 请求错误转发为 HTTP。
+    proxy: false,
+    timeout: 15000,
+    headers,
   });
+  if (encRes.data?.error !== 0 || !encRes.data.data) throw new Error("斗鱼签名获取失败");
+
+  const d = encRes.data.data;
+  const ts = Math.round(Date.now() / 1000);
+  const params = new URLSearchParams({
+    enc_data: d.enc_data,
+    tt: String(ts),
+    did,
+    auth: getDouyuRealLiveAuth(rid, did, ts, d.key, d.rand_str, d.enc_time, d.is_special),
+    cdn: "",
+    rate: "-1",
+    hevc: "0",
+    fa: "0",
+    ive: "0",
+  });
+  const requestPlay = async () => {
+    const response = await axios.post(`https://www.douyu.com/lapi/live/getH5PlayV1/${rid}`, params.toString(), {
+      proxy: false,
+      timeout: 15000,
+      headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    return response.data;
+  };
+
+  let result = await requestPlay();
+  if (result?.error !== 0 || !result.data) throw new Error("斗鱼播放请求失败，房间可能未开播或账号需要重新登录");
+
+  // 账号和房间返回的画质编号可能不同，优先使用接口提供的实际编号。
+  const rates = parseDouyuQualities(result.data.multirates);
+  const selected = chooseDouyuQuality(rates, qn, selectedRate);
+  const rate = String(selected?.rate ?? selectedRate ?? QN_DOUYU[qn]);
+  if (String(result.data.rate) !== rate) {
+    params.set("rate", rate);
+    result = await requestPlay();
+    if (result?.error !== 0 || !result.data) throw new Error("斗鱼画质切换失败");
+  }
+
+  const actualRates = parseDouyuQualities(result.data.multirates);
+  return describeDouyuPlayback(result.data, actualRates.length ? actualRates : rates, Number(rate), type);
+}
+
+export async function getDouyuPlayback(rid: string, qn: IQnType, type: IStreamType, cookie = "", rate?: number): Promise<PlaybackResult> {
+  let primary: PlaybackResult;
+  try {
+    primary = await getV1Playback(rid, qn, type, cookie, rate);
+  } catch {
+    return getDouyuDartPlayback(rid, qn, type, cookie, rate);
+  }
+  if (cookie && primary.warning) {
+    try {
+      const alternate = await getDouyuDartPlayback(rid, qn, type, cookie, rate);
+      if (!alternate.warning) return alternate;
+    } catch { /* Keep the working stream when the alternate endpoint is unavailable. */ }
+  }
+  return primary;
+}
+
+export async function getRealLive_Douyu(rid: string, qn: IQnType, type: IStreamType, cookie = ""): Promise<string> {
+  return (await getDouyuPlayback(rid, qn, type, cookie)).stream;
 }

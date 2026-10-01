@@ -1,12 +1,13 @@
 {
   "name": "uni-live",
   "private": true,
-  "description": "DouyuEx联播 - 多平台直播联播",
+  "description": "多看 - 多平台直播工作台",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p 7002",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "test": "node --require ./tests/register.cjs --test"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
@@ -16,6 +17,8 @@
     "douyu-danmu-ws": "1.0.4",
     "next": "15.5.20",
     "pako": "2.1.0",
+    "playwright-core": "1.63.0",
+    "quickjs-emscripten": "^0.32.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-player": "2.16.0"

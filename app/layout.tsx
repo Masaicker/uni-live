@@ -1,22 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Poppins, Righteous } from "next/font/google";
 import "./globals.css";
 
-const poppins = Poppins({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-poppins",
-});
-
-const righteous = Righteous({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-righteous",
-});
-
 export const metadata: Metadata = {
-  title: "DouyuEx联播",
-  description: "支持斗鱼、B站、虎牙多直播间同时播放与弹幕叠加",
+  title: "多看",
+  description: "把喜欢的直播，放在一起。支持斗鱼、虎牙多画面观看。",
+  icons: { icon: "/duokan.svg", shortcut: "/duokan.svg" },
 };
 
 export const viewport: Viewport = {
@@ -30,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className={`${poppins.variable} ${righteous.variable}`}>
+    <html lang="zh-CN">
       <body className="min-h-dvh bg-background font-sans text-foreground antialiased">
         {children}
       </body>

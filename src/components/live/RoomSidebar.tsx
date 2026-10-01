@@ -1,0 +1,206 @@
+"use client";
+
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, Check, ArrowUp, ArrowDown, XSquare } from "@phosphor-icons/react";
+import type { FollowedRoom, MonitorVideo } from "@/types";
+import { platformNames, roomLabel } from "@/lib/room-identity";
+import { followedRooms, watchingHistory } from "@/features/monitor/library";
+import { IconButton } from "./IconButton";
+import { RoomAvatar } from "./RoomAvatar";
+import { FollowButton } from "./FollowButton";
+
+interface Props {
+  rooms: FollowedRoom[];
+  videos: MonitorVideo[];
+  collapsed: boolean;
+  adding: boolean;
+  focused: boolean;
+  view: "list" | "avatars";
+  onViewChange: (view: "list" | "avatars") => void;
+  onReorder: (from: string, to: string) => void;
+  onCollapse: (value: boolean) => void;
+  onAdd: (url: string) => Promise<"history" | "layout" | false>;
+  onOpen: (id: string) => void;
+  onClose: (id: string) => void;
+  onCloseAll: () => void;
+  onFollow: (id: string, followed: boolean) => void;
+  onForget: (id: string) => void;
+  onClearHistory: () => void;
+  refreshingAll: boolean;
+  onRefreshAll: () => void;
+  onArrange: () => void;
+  onMuteAll: () => void;
+  onClean: () => void;
+  onExitFocus: () => void;
+  onSettings: () => void;
+}
+
+export function RoomSidebar(props: Props) {
+  const [tab, setTab] = useState<"followed" | "history">("followed");
+  const [query, setQuery] = useState("");
+  const [url, setUrl] = useState("");
+  const [avatarMenu, setAvatarMenu] = useState<{ id: string; left: number; top: number } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: "before" | "after" } | null>(null);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const draggedRef = useRef<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement | null>(null);
+  const followed = followedRooms(props.rooms, !editing);
+  const liveCount = followed.filter((room) => room.liveStatus === true).length;
+  const history = watchingHistory(props.rooms);
+  const source = tab === "followed" ? followed : history;
+  const visible = source.filter((room) => `${roomLabel(room)} ${room.title} ${room.rid} ${platformNames[room.platform]}`.toLowerCase().includes(query.toLowerCase()));
+  const avatarView = !editing && props.view === "avatars";
+  const selected = props.rooms.find((room) => room.id === avatarMenu?.id);
+  const selectedVideo = props.videos.find((video) => video.id === selected?.id);
+  const draggedRoom = props.rooms.find((room) => room.id === dragged);
+
+  const clearDrag = () => { draggedRef.current = null; setDragged(null); setDropTarget(null); };
+  useEffect(() => { setAvatarMenu(null); setEditing(false); draggedRef.current = null; setDragged(null); setDropTarget(null); }, [tab, props.view, props.collapsed]);
+  useLayoutEffect(() => {
+    if (!avatarMenu || !menuRef.current) return;
+    const bounds = menuRef.current.getBoundingClientRect();
+    const left = Math.max(12, Math.min(avatarMenu.left, window.innerWidth - bounds.width - 12));
+    const top = Math.max(12, Math.min(avatarMenu.top, window.innerHeight - bounds.height - 12));
+    if (left !== avatarMenu.left || top !== avatarMenu.top) setAvatarMenu({ ...avatarMenu, left, top });
+  }, [avatarMenu]);
+  useEffect(() => {
+    if (!avatarMenu) return;
+    const outside = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node) && !menuButton.current?.contains(event.target as Node)) setAvatarMenu(null); };
+    const resize = () => setAvatarMenu(null);
+    const scroll = (event: Event) => { if (!menuRef.current?.contains(event.target as Node)) setAvatarMenu(null); };
+    document.addEventListener("pointerdown", outside, true);
+    window.addEventListener("resize", resize);
+    document.addEventListener("scroll", scroll, true);
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("resize", resize); document.removeEventListener("scroll", scroll, true); };
+  }, [avatarMenu]);
+
+  const submit = async () => { if (!url.trim()) return; const result = await props.onAdd(url); if (result) { setUrl(""); if (result === "history") setTab("history"); } };
+  const avatarMiddleClick = (event: React.MouseEvent<HTMLButtonElement>, id: string) => {
+    if (event.button !== 1 || editing) return;
+    event.preventDefault(); event.stopPropagation(); setAvatarMenu(null);
+    if (props.videos.some((video) => video.id === id)) props.onClose(id); else props.onOpen(id);
+  };
+  const openAvatarMenu = (event: React.MouseEvent<HTMLButtonElement>, room: FollowedRoom) => {
+    if (editing) return;
+    if (avatarMenu?.id === room.id) { setAvatarMenu(null); return; }
+    const rect = event.currentTarget.getBoundingClientRect();
+    menuButton.current = event.currentTarget;
+    setAvatarMenu({ id: room.id, left: Math.max(12, Math.min(props.collapsed ? rect.right + 8 : rect.left, window.innerWidth - 244)), top: Math.max(12, Math.min(props.collapsed ? rect.top : rect.bottom + 6, window.innerHeight - 132)) });
+  };
+  const sortKeys = (event: React.KeyboardEvent, room: FollowedRoom) => {
+    if (!editing || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const index = visible.findIndex((peer) => peer.id === room.id);
+    const next = visible[index + (["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1)];
+    if (next) props.onReorder(room.id, next.id);
+  };
+  const sortable = (room: FollowedRoom) => ({
+    onDragStart: (event: React.DragEvent) => {
+      if (!editing || !(event.target as HTMLElement).closest("[data-sort-handle]")) { event.preventDefault(); return; }
+      draggedRef.current = room.id; setDragged(room.id);
+      event.dataTransfer.setData("text/plain", room.id); event.dataTransfer.effectAllowed = "move";
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const preview = event.currentTarget.cloneNode(true) as HTMLElement;
+      preview.classList.add("library-drag-preview");
+      preview.removeAttribute("data-library-room");
+      preview.setAttribute("aria-hidden", "true");
+      Object.assign(preview.style, { position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px` });
+      document.body.appendChild(preview);
+      event.dataTransfer.setDragImage(preview, event.clientX - bounds.left, event.clientY - bounds.top);
+      requestAnimationFrame(() => preview.remove());
+    },
+    onDragOver: (event: React.DragEvent) => {
+      const from = visible.findIndex((item) => item.id === draggedRef.current), to = visible.indexOf(room);
+      if (editing && from >= 0 && from !== to) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTarget({ id: room.id, edge: from < to ? "after" : "before" }); }
+    },
+    onDragLeave: (event: React.DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget((target) => target?.id === room.id ? null : target); },
+    onDrop: (event: React.DragEvent) => {
+      event.preventDefault();
+      if (editing && draggedRef.current) props.onReorder(draggedRef.current, room.id);
+      clearDrag();
+    },
+    onDragEnd: clearDrag,
+  });
+  const tools = <>
+    <IconButton label="刷新所有房间" disabled={props.refreshingAll || !props.rooms.some((room) => room.followed || props.videos.some((video) => video.id === room.id))} onClick={props.onRefreshAll}><ArrowsClockwise size={18} className={props.refreshingAll ? "animate-spin" : ""} /></IconButton>
+    <IconButton label="整理全部" onClick={props.onArrange}><SquaresFour size={18} /></IconButton>
+    <IconButton label="全部静音" onClick={props.onMuteAll}><SpeakerSlash size={18} /></IconButton>
+    <IconButton label="清理临时房间并整理" disabled={!props.videos.some((video) => !video.followed)} onClick={props.onClean}><Broom size={18} /></IconButton>
+    <IconButton label="关闭全部画面" disabled={!props.videos.length} onClick={props.onCloseAll} className="bulk-close-button"><XSquare size={18} /></IconButton>
+    <IconButton label="设置" onClick={props.onSettings}><GearSix size={18} /></IconButton>
+  </>;
+  const sidebar = props.collapsed ? <aside className="sidebar-rail" aria-label="直播工具栏">
+    <IconButton label="展开房间列表" onClick={() => props.onCollapse(false)}><CaretRight size={18} /></IconButton>
+    <span className="rail-live-count" title={`${liveCount} 个关注正在直播`} aria-label={`${liveCount} 个关注正在直播`}><span className={`status-dot ${liveCount > 0 ? "is-live" : ""}`} />{liveCount}</span>
+    <div className="rail-live-avatars" aria-label="正在直播的关注">{followed.filter((room) => room.liveStatus === true).map((room) => <div key={room.id} className="room-avatar-item is-live" data-library-room={room.id} data-live-status="true">
+      <button type="button" aria-label={`房间操作：${roomLabel(room)}`} aria-expanded={avatarMenu?.id === room.id} title={`${roomLabel(room)} · ${platformNames[room.platform]} · 直播中 · 中键打开／关闭画面`} onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => avatarMiddleClick(event, room.id)} onClick={(event) => openAvatarMenu(event, room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} />{props.videos.some((video) => video.id === room.id) && <span className="avatar-layout-badge" aria-label="在布局中" />}</button>
+    </div>)}</div>
+    {props.focused && <IconButton label="退出聚焦" onClick={props.onExitFocus}><CornersIn size={18} /></IconButton>}
+    {tools}
+  </aside> : <aside className="room-sidebar" aria-label="房间列表">
+    <header className="sidebar-header"><div className="brand-mark"><SquaresFour size={20} /><span>多看</span></div><IconButton label="收起房间列表" onClick={() => props.onCollapse(true)}><CaretLeft size={18} /></IconButton></header>
+    <div className="sidebar-inputs">
+      <form onSubmit={(event) => { event.preventDefault(); void submit(); }} className="flex gap-2">
+        <input aria-label="直播间地址" className="text-input min-w-0 flex-1" placeholder="粘贴直播间地址" value={url} onChange={(event) => setUrl(event.target.value)} autoComplete="off" />
+        <button type="submit" className="add-room-button" aria-label="添加直播间" title="验证并添加房间" disabled={props.adding || !url.trim()}><Plus size={18} className={props.adding ? "animate-spin" : ""} /></button>
+      </form>
+      <label className="search-input"><MagnifyingGlass size={16} /><input aria-label="搜索房间" placeholder="搜索主播或房间" value={query} onChange={(event) => { setQuery(event.target.value); setEditing(false); clearDrag(); }} /></label>
+    </div>
+    <nav className="library-tabs" aria-label="房间分类">
+      <button aria-current={tab === "followed" ? "page" : undefined} onClick={() => setTab("followed")}><Star size={14} />关注<span>{followed.length}</span></button>
+      <button aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><ClockCounterClockwise size={14} />历史<span>{history.length}</span></button>
+    </nav>
+    <div className="sidebar-section-label"><span>{tab === "followed" ? "关注房间" : "最近访问"}</span>
+      <div className="library-view-tools">
+        {tab === "followed" ? <button type="button" className={`sort-mode-button ${editing ? "is-active" : ""}`} aria-pressed={editing} disabled={!editing && (Boolean(query) || followed.length < 2)} onClick={() => { setEditing(!editing); setAvatarMenu(null); clearDrag(); }}>{editing ? <Check size={13} /> : <DotsSixVertical size={13} />}{editing ? "完成排序" : "编辑排序"}</button>
+          : history.length > 0 && <button onClick={props.onClearHistory}>清空记录</button>}
+        {tab === "followed" && <IconButton label={props.view === "avatars" ? "切换为列表视图" : "切换为头像视图"} disabled={editing} onClick={() => props.onViewChange(props.view === "avatars" ? "list" : "avatars")}>{props.view === "avatars" ? <List size={16} /> : <SquaresFour size={16} />}</IconButton>}
+      </div>
+    </div>
+    {editing && <p className="sort-mode-hint">拖动手柄、方向键或上下按钮调整顺序，完成后直播中的房间优先显示。</p>}
+    <div className="room-list" data-sorting={editing}>
+      {visible.length === 0 ? <div className="sidebar-empty">{tab === "followed" ? <Star size={24} /> : <ClockCounterClockwise size={24} />}<p>{query ? "没有找到这个房间" : tab === "followed" ? "把常看的主播留在这里" : "最近添加或观看的房间会在这里"}</p><span>{query ? "尝试主播名或房间号" : tab === "followed" ? "点击画面标题栏的星标，添加关注" : "确认房间存在后自动记录，未开播也可关注"}</span></div>
+      : <div className={avatarView ? "room-avatar-grid" : undefined}>{visible.map((room) => {
+          const video = props.videos.find((item) => item.id === room.id);
+          const liveStatus = room.liveStatus === true ? "直播中" : room.liveStatus === false ? "未开播" : "状态未知";
+          const playbackStatus = video?.status === "error" ? "连接失败" : video?.status === "loading" || video?.isRefreshing ? "连接中" : video ? video.paused ? "已暂停" : "在布局中" : "";
+          const dropEdge = dropTarget?.id === room.id ? dropTarget.edge : undefined;
+          const dragClass = dragged === room.id ? "is-dragging" : "";
+          if (avatarView) return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} className={`room-avatar-item ${room.liveStatus === true ? "is-live" : ""} ${video ? "is-watching" : ""}`}>
+            <button type="button" aria-label={`房间操作：${roomLabel(room)}`} aria-expanded={avatarMenu?.id === room.id} title={`${roomLabel(room)} · ${platformNames[room.platform]} · ${liveStatus}${playbackStatus ? ` · ${playbackStatus}` : ""} · 中键打开／关闭画面`} onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => avatarMiddleClick(event, room.id)} onClick={(event) => openAvatarMenu(event, room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} />{video && <span className="avatar-layout-badge" aria-label="在布局中" />}</button>
+          </div>;
+          return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} data-drop-edge={dropEdge} className={`room-list-item ${video ? "is-watching" : ""} ${dragClass}`} {...sortable(room)}>
+            <div className="flex items-center gap-2">
+              {editing && <button type="button" className="sort-handle" data-sort-handle draggable aria-label={`拖动排序：${roomLabel(room)}`} title="拖动或使用方向键排序" onKeyDown={(event) => sortKeys(event, room)}><DotsSixVertical size={15} /></button>}
+              <button type="button" className="room-open-button" onClick={() => { if (!editing) props.onOpen(room.id); }} title={room.title || roomLabel(room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} /><span className="min-w-0 flex-1"><span className="room-name">{roomLabel(room)}</span></span></button>
+              {editing ? <div className="sort-move-buttons">
+                <IconButton label={`上移：${roomLabel(room)}`} disabled={visible[0]?.id === room.id} onClick={() => props.onReorder(room.id, visible[visible.indexOf(room) - 1].id)}><ArrowUp size={14} /></IconButton>
+                <IconButton label={`下移：${roomLabel(room)}`} disabled={visible[visible.length - 1]?.id === room.id} onClick={() => props.onReorder(room.id, visible[visible.indexOf(room) + 1].id)}><ArrowDown size={14} /></IconButton>
+              </div> : <>
+                <FollowButton followed={room.followed} size={15} onChange={(followed) => props.onFollow(room.id, followed)} />
+                <IconButton label={video ? "关闭画面" : "打开直播"} onClick={() => video ? props.onClose(room.id) : props.onOpen(room.id)}>{video ? <Stop size={16} weight="fill" /> : <Play size={16} />}</IconButton>
+                {tab === "history" && <IconButton label="删除历史记录" danger onClick={() => props.onForget(room.id)}><Trash size={15} /></IconButton>}
+              </>}
+            </div>
+            <div className="room-subtitle"><span className={`status-dot ${room.liveStatus === true ? "is-live" : ""}`} /><span>{platformNames[room.platform]} · {liveStatus}</span>{playbackStatus && <span>· {playbackStatus}</span>}</div>
+          </div>;
+        })}</div>}
+    </div>
+    {editing && <span className="sr-only" role="status">{draggedRoom ? `正在拖动${roomLabel(draggedRoom)}${dropTarget ? "，松开可放到标记位置" : ""}` : "排序模式已开启"}</span>}
+    <footer className="sidebar-footer">{props.focused && <button className="sidebar-exit-focus" onClick={props.onExitFocus}><CornersIn size={15} />退出聚焦<span>Esc</span></button>}<div className="flex items-center justify-between">{tools}</div></footer>
+  </aside>;
+  return <>{sidebar}{avatarMenu && selected && createPortal(<div ref={menuRef} className="room-avatar-menu" role="menu" aria-label={`${roomLabel(selected)}房间操作`} style={{ left: avatarMenu.left, top: avatarMenu.top }} onKeyDown={(event) => {
+      if (event.key === "Escape") { event.stopPropagation(); setAvatarMenu(null); menuButton.current?.focus(); }
+      if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")], index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : buttons.length - 1)) % buttons.length]?.focus(); }
+    }}><div className="avatar-menu-heading"><RoomAvatar url={selected.avatarUrl} platform={selected.platform} /><div className="avatar-menu-identity"><strong>{roomLabel(selected)}</strong><span><span className={`status-dot ${selected.liveStatus === true ? "is-live" : ""}`} />{platformNames[selected.platform]} · {selected.liveStatus === true ? "直播中" : selected.liveStatus === false ? "未开播" : "状态未知"}</span></div></div>
+      <div className="avatar-menu-actions">
+        <button type="button" role="menuitem" className="icon-button" aria-label={selectedVideo ? "关闭画面" : "打开直播"} title={selectedVideo ? "关闭画面" : "打开直播"} onClick={() => { if (selectedVideo) props.onClose(selected.id); else props.onOpen(selected.id); setAvatarMenu(null); }}>{selectedVideo ? <Stop size={19} weight="fill" /> : <Play size={19} />}</button>
+        <FollowButton followed={selected.followed} size={19} menuItem onChange={(followed) => { props.onFollow(selected.id, followed); setAvatarMenu(null); }} />
+        {!props.collapsed && tab === "history" && selected.lastWatchedAt !== undefined && <button type="button" role="menuitem" className="icon-button is-danger avatar-menu-delete" aria-label="删除历史记录" title="删除历史记录" onClick={() => { props.onForget(selected.id); setAvatarMenu(null); }}><Trash size={19} /></button>}
+      </div>
+    </div>, document.body)}</>;
+}

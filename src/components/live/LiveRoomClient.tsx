@@ -1,812 +1,481 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deserialize, DouyuDanmu } from "douyu-danmu-ws";
-import { LiveWS } from "bilibili-live-ws/browser";
-import { Plus } from "@phosphor-icons/react";
-import type {
-  DanmakuDisplayMode,
-  GridLayoutState,
-  IDanmaku,
-  IQnType,
-  IStreamType,
-  IVideo,
-  IVideoOrder,
-  LayoutMode,
-  VideoLayout,
-} from "@/types";
-import {
-  apiGetBilibiliRealRid,
-  apiGetDouyuRealRid,
-  apiGetHuyaChannelInfo,
-} from "@/apis";
-import { FreeLayoutCanvas } from "@/features/free-layout/FreeLayoutCanvas";
-import {
-  buildShareUrl,
-  createDefaultLayout,
-  migrateShowType,
-  parseShareDanmakuList,
-  parseShareGridLayout,
-  parseShareVideoList,
-} from "@/features/free-layout/layout-utils";
-import { GridLayoutCanvas } from "@/features/grid-layout/GridLayoutCanvas";
-import {
-  assignVideoToFirstEmpty,
-  createInitialGrid,
-  isSameGridState,
-  reconcileGridWithVideos,
-  removeVideoFromGrid,
-} from "@/features/grid-layout/grid-utils";
-import {
-  DanmakuLayer,
-  getDouyuDanmakuColor,
-  type DanmakuLayerHandle,
-} from "@/features/danmaku/DanmakuLayer";
-import {
-  getStreamErrorMessage,
-  resolveStreamUrl,
-} from "@/features/video/stream-service";
-import {
-  arrayMoveDown,
-  arrayMoveUp,
-  copyText,
-  detectStreamType,
-  getLastField,
-  getStrMiddle,
-  isRid,
-  parseUrlParams,
-  sleep,
-} from "@/lib/utils";
-import useLatest from "@/hooks/useLatest";
-import { initHuyaDanmaku } from "@/lib/danmaku/huya";
-import { resolveRoomKey } from "@/lib/room-key";
-import { ControlDock, type DockDisplayState } from "@/components/live/ControlDock";
-import { SettingsPanel, type SettingsFocus } from "@/components/live/SettingsPanel";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { SquaresFour, SidebarSimple, Plus } from "@phosphor-icons/react";
+import type { FollowedRoom, IQnType, MonitorVideo, PlaybackResult, RoomInfo } from "@/types";
+import { apiGetRoomInfo } from "@/apis";
+import { RoomSidebar } from "./RoomSidebar";
+import { SettingsPanel, DEFAULT_DANMAKU_PREFERENCES, type DanmakuPreferences } from "./SettingsPanel";
+import { MonitorCanvas } from "@/features/monitor/MonitorCanvas";
+import { autoLayouts, arrangeByPosition, insertionLayout, type CanvasSize } from "@/features/monitor/geometry";
+import { initialMonitorState, monitorReducer, workspaceSnapshot, type MonitorAction } from "@/features/monitor/state";
+import { createRoom, qualities, restoreWorkspace, shareWorkspace, WORKSPACE_KEY, type LegacyShare } from "@/features/monitor/storage";
+import { getStreamErrorMessage, resolveStreamUrl } from "@/features/video/stream-service";
+import { copyText, detectStreamType } from "@/lib/utils";
+import { roomIdentity, roomLabel } from "@/lib/room-identity";
+import { assertPlatformEnabled, isPlatformEnabled } from "@/lib/platform-support";
+import { DOUYU_COOKIE_EVENT } from "@/lib/douyu-cookie";
+import { DEFAULT_RECOVERY_PREFERENCES, normalizeRecoveryPreferences, type RecoveryEvent, type RecoveryPreferences } from "@/features/video/playback-watchdog";
 
-interface LiveRoomClientProps {
-  shareVideo?: string | null;
-  shareDanmaku?: string | null;
-  shareLayoutMode?: string | null;
-  shareLineCount?: string | null;
-  shareGrid?: string | null;
-  legacyShowType?: string | null;
-}
+const PREFERENCES_KEY = "uni-live.preferences.v2";
+type StreamSelection = { rate?: number; qn: IQnType };
+type PlaybackBackup = Pick<MonitorVideo, "stream" | "qnName" | "preferredRate" | "selectedQuality" | "qualities" | "warning"> & { key: number; expires: number };
 
-export function LiveRoomClient({
-  shareVideo,
-  shareDanmaku,
-  shareLayoutMode,
-  shareLineCount,
-  shareGrid,
-  legacyShowType,
-}: LiveRoomClientProps) {
-  const [streamType] = useState<IStreamType>(() => detectStreamType());
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("free");
-  const [lineCount, setLineCount] = useState(2);
-  const [qnName, setQnName] = useState<IQnType>("原画");
-  const [videos, setVideos] = useState<IVideo[]>([]);
-  const [videoOrderList, setVideoOrderList] = useState<IVideoOrder[]>([]);
-  const [danmakuList, setDanmakuList] = useState<IDanmaku[]>([]);
-  const [danmakuOpacity, setDanmakuOpacity] = useState(90);
-  const [danmakuDensity, setDanmakuDensity] = useState(20);
-  const [danmakuSpeed, setDanmakuSpeed] = useState(120);
-  const [danmakuDisplayMode, setDanmakuDisplayMode] =
-    useState<DanmakuDisplayMode>("independent");
-  const [gridLayout, setGridLayout] = useState<GridLayoutState>(() =>
-    createInitialGrid(2, 2)
-  );
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsFocus, setSettingsFocus] = useState<SettingsFocus | undefined>();
-  const [isAddingVideo, setIsAddingVideo] = useState(false);
-  const [isAddingDanmaku, setIsAddingDanmaku] = useState(false);
+export function LiveRoomClient(share: LegacyShare) {
+  const [state, reactDispatch] = useReducer(monitorReducer, initialMonitorState);
+  const current = useRef(state);
+  current.current = state;
+  // Async operations and consecutive UI actions must observe the same reducer state.
+  const send = useCallback((action: MonitorAction) => {
+    current.current = monitorReducer(current.current, action);
+    reactDispatch(action);
+  }, []);
+  const [ready, setReady] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [libraryView, setLibraryView] = useState<"list" | "avatars">("list");
+  const [autoFocusAudio, setAutoFocusAudio] = useState(true);
+  const [recovery, setRecovery] = useState<RecoveryPreferences>(DEFAULT_RECOVERY_PREFERENCES);
+  const recoveryPreferences = useRef(recovery);
+  recoveryPreferences.current = recovery;
+  const [mobile, setMobile] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [settings, setSettings] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const refreshAllActive = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [dockDisplayState, setDockDisplayState] =
-    useState<DockDisplayState>("collapsed");
-  const [isDockClosed, setIsDockClosed] = useState(false);
+  const [closedRooms, setClosedRooms] = useState<{ rooms: FollowedRoom[]; manual: boolean } | null>(null);
+  const [unfollowedRoom, setUnfollowedRoom] = useState<FollowedRoom | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [quality, setQuality] = useState<IQnType>("原画");
+  const [danmaku, setDanmaku] = useState<DanmakuPreferences>({ ...DEFAULT_DANMAKU_PREFERENCES });
+  const [size, setSize] = useState<CanvasSize>({ width: 1, height: 1 });
+  const canvas = useRef<HTMLDivElement>(null);
+  const streamRequests = useRef(new Map<string, AbortController>());
+  const metadataRequests = useRef(new Map<string, AbortController>());
+  const playbackBackups = useRef(new Map<string, PlaybackBackup>());
+  const recoveryRequests = useRef(new Map<string, AbortController>());
+  const addRequest = useRef<AbortController | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const initialShare = useRef(share);
+  const streamType = useRef<ReturnType<typeof detectStreamType>>("flv");
 
-  const danmakuRef = useRef<DanmakuLayerHandle>(null);
-  const fallbackDanmakuRef = useRef<DanmakuLayerHandle>(null);
-  const videoDanmakuRefs = useRef<Map<string, DanmakuLayerHandle>>(new Map());
-  const videoOrderListRef = useLatest(videoOrderList);
-  const danmakuListRef = useLatest(danmakuList);
-  const videosRef = useLatest(videos);
-  const danmakuDisplayModeRef = useLatest(danmakuDisplayMode);
-  const layoutModeRef = useLatest(layoutMode);
-  const refreshLocks = useRef<Set<string>>(new Set());
-  const isAppReadyRef = useRef(false);
+  const dismissUndo = useCallback(() => { clearTimeout(undoTimer.current); setClosedRooms(null); setUnfollowedRoom(null); }, []);
 
-  const openSettings = useCallback((focus?: SettingsFocus) => {
-    setSettingsFocus(focus);
-    setIsSettingsOpen(true);
-  }, []);
-
-  const closeSettings = useCallback(() => {
-    setIsSettingsOpen(false);
-    setSettingsFocus(undefined);
-  }, []);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("dockVisible");
-    if (saved !== null) {
-      setDockDisplayState(saved === "true" ? "expanded" : "collapsed");
-    }
-    const savedSpeed = localStorage.getItem("danmakuSpeed");
-    if (savedSpeed) setDanmakuSpeed(Number(savedSpeed));
-    const savedOpacity = localStorage.getItem("danmakuOpacity");
-    if (savedOpacity) setDanmakuOpacity(Number(savedOpacity));
-    const savedDensity = localStorage.getItem("danmakuDensity");
-    if (savedDensity) setDanmakuDensity(Number(savedDensity));
-    const savedDisplayMode = localStorage.getItem("danmakuDisplayMode");
-    if (savedDisplayMode === "merged" || savedDisplayMode === "independent") {
-      setDanmakuDisplayMode(savedDisplayMode);
-    }
+  const notify = useCallback((message: string) => {
+    clearTimeout(toastTimer.current);
+    setToast(message);
+    toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsMobile(mq.matches);
+    streamType.current = detectStreamType();
+    try {
+      send({ type: "hydrate", snapshot: restoreWorkspace(localStorage, initialShare.current) });
+      const saved = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "null");
+      if (saved) {
+        setCollapsed(saved.collapsed === true);
+        setLibraryView(saved.libraryView === "avatars" ? "avatars" : "list");
+        setAutoFocusAudio(saved.autoFocusAudio !== false);
+        setRecovery(normalizeRecoveryPreferences(saved.recovery));
+        if (qualities.includes(saved.quality)) setQuality(saved.quality);
+      }
+      const bounded = (key: string, fallback: number, min: number, max: number) => {
+        const raw = saved?.danmaku?.[key] ?? localStorage.getItem(`danmaku${key[0].toUpperCase()}${key.slice(1)}`);
+        const value = raw === null || raw === undefined ? fallback : Number(raw);
+        return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+      };
+      setDanmaku({ opacity: bounded("opacity", DEFAULT_DANMAKU_PREFERENCES.opacity, 0, 100), density: bounded("density", DEFAULT_DANMAKU_PREFERENCES.density, 0, 300), speed: bounded("speed", DEFAULT_DANMAKU_PREFERENCES.speed, 40, 400), fontSize: bounded("fontSize", DEFAULT_DANMAKU_PREFERENCES.fontSize, 12, 40), thumbnailFontSize: bounded("thumbnailFontSize", DEFAULT_DANMAKU_PREFERENCES.thumbnailFontSize, 10, 24) });
+    } catch { notify("本地设置读取失败，仍可添加直播间"); }
+    setReady(true);
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => setMobile(media.matches);
     update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [notify, send]);
 
   useEffect(() => {
-    if (!isDockClosed) {
-      localStorage.setItem(
-        "dockVisible",
-        String(dockDisplayState === "expanded")
-      );
+    const node = canvas.current;
+    if (!node) return;
+    const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const videoIds = state.videos.map((v) => v.id).join(",");
+  useEffect(() => {
+    if (!ready || current.current.manual || size.width < 2 || size.height < 2) return;
+    send({ type: "arrange", layouts: autoLayouts(current.current.videos.map((v) => v.id), size) });
+  }, [videoIds, size, ready, state.manual, send]);
+
+  useEffect(() => {
+    if (!ready) return;
+    try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaceSnapshot(state))); }
+    catch { notify("浏览器存储空间不足，本次修改未能保存"); }
+  }, [state, ready, notify]); // Runtime streams are excluded by workspaceSnapshot.
+
+  useEffect(() => {
+    if (!ready) return;
+    try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ collapsed, quality, danmaku, libraryView, autoFocusAudio, recovery })); }
+    catch { notify("观看偏好未能保存"); }
+  }, [collapsed, quality, danmaku, libraryView, autoFocusAudio, recovery, ready, notify]);
+
+  const stopWatching = useCallback((id: string, remove = false) => {
+    recoveryRequests.current.get(id)?.abort();
+    recoveryRequests.current.delete(id);
+    streamRequests.current.get(id)?.abort();
+    streamRequests.current.delete(id);
+    playbackBackups.current.delete(id);
+    send({ type: remove ? "remove" : "close", id });
+    if (!current.current.rooms.some((room) => room.id === id)) { metadataRequests.current.get(id)?.abort(); metadataRequests.current.delete(id); }
+  }, [send]);
+
+  const applyIdentity = useCallback((id: string, info: Partial<RoomInfo> & { lastStatusAt?: number }) => {
+    const room = current.current.rooms.find((r) => r.id === id);
+    if (!room) return false;
+    const resolved = { ...room, ...info };
+    const existing = current.current.rooms.find((r) => r.id !== id && roomIdentity(r) === roomIdentity(resolved));
+    if (existing) {
+      const wasOpen = current.current.videos.some((v) => v.id === id);
+      send({ type: "room", id: existing.id, patch: { ...info, followed: existing.followed || room.followed, followOrder: existing.followed ? existing.followOrder : room.followOrder, lastWatchedAt: Math.max(existing.lastWatchedAt ?? 0, room.lastWatchedAt ?? 0) || undefined } });
+      stopWatching(id, true);
+      if (wasOpen && !current.current.videos.some((v) => v.id === existing.id)) {
+        send({ type: "open", id: existing.id, layout: insertionLayout(current.current.videos.map((v) => v.layout), size) });
+      }
+      return false;
     }
-  }, [dockDisplayState, isDockClosed]);
+    send({ type: "room", id, patch: info });
+    return true;
+  }, [send, size, stopWatching]);
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
-  }, []);
+  const loadMetadata = useCallback(async (id: string, signal?: AbortSignal) => {
+    const room = current.current.rooms.find((r) => r.id === id);
+    if (signal?.aborted || !room || !isPlatformEnabled(room.platform) || room.platform === "direct" || room.platform === "unknown" || metadataRequests.current.has(id)) return;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    metadataRequests.current.set(id, controller);
+    try {
+      const info = await apiGetRoomInfo(room.platform, room.rid, controller.signal);
+      if (!controller.signal.aborted && metadataRequests.current.get(id) === controller) { applyIdentity(id, { ...info, lastStatusAt: Date.now() }); return info; }
+    } catch {
+      if (!controller.signal.aborted) send({ type: "room", id, patch: { liveStatus: null, lastStatusAt: Date.now() } });
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      if (metadataRequests.current.get(id) === controller) metadataRequests.current.delete(id);
+    }
+  }, [applyIdentity, send]);
 
+  const followedIds = state.rooms.filter((room) => room.followed).map((room) => room.id).join(",");
   useEffect(() => {
-    initHuyaDanmaku();
-  }, []);
-
-  const registerVideoDanmaku = useCallback(
-    (videoId: string, handle: DanmakuLayerHandle | null) => {
-      if (handle) {
-        videoDanmakuRefs.current.set(videoId, handle);
-      } else {
-        videoDanmakuRefs.current.delete(videoId);
-      }
-    },
-    []
-  );
-
-  const pushDanmaku = useCallback(
-    (roomKey: string, text: string, opts?: { color?: string }) => {
-      if (danmakuDisplayModeRef.current === "merged") {
-        danmakuRef.current?.push(text, opts);
-        return;
-      }
-
-      const candidates = videosRef.current.filter(
-        (v) =>
-          v.rid &&
-          roomKey &&
-          String(v.rid) === String(roomKey) &&
-          v.layout.visible
-      );
-
-      let target = candidates[0];
-      if (candidates.length > 1 && layoutModeRef.current === "overlap") {
-        target = candidates.reduce((best, v) =>
-          v.order > best.order ? v : best
-        );
-      }
-
-      if (target) {
-        videoDanmakuRefs.current.get(target.id)?.push(text, opts);
-      } else {
-        fallbackDanmakuRef.current?.push(text, opts);
-      }
-    },
-    [danmakuDisplayModeRef, layoutModeRef, videosRef]
-  );
-
-  const syncVideoOrder = useCallback(() => {
-    setVideos((prev) => {
-      const orderMap = new Map(
-        videoOrderList.map((item, index) => [item.id, index])
-      );
-      return prev.map((v) => ({
-        ...v,
-        order: orderMap.get(v.id) ?? v.order,
-      }));
-    });
-  }, [videoOrderList]);
-
-  useEffect(() => {
-    syncVideoOrder();
-  }, [syncVideoOrder]);
-
-  const addVideo = useCallback(
-    async (
-      url: string,
-      quality: IQnType = qnName,
-      savedLayout?: VideoLayout,
-      savedId?: string
-    ) => {
-      if (!url.trim()) return;
-      setIsAddingVideo(true);
-      const id = savedId ?? String(Date.now() + Math.random());
-      const index = videoOrderListRef.current.length;
-
-      try {
-        const { stream, rid, platform } = await resolveStreamUrl(
-          url,
-          quality,
-          streamType
-        );
-        const errorMessage = getStreamErrorMessage(stream, platform);
-        const layout =
-          savedLayout ?? createDefaultLayout(index, index + 1);
-
-        const video: IVideo = {
-          id,
-          order: index,
-          url,
-          rid,
-          stream: errorMessage ? "" : stream,
-          qnName: quality,
-          streamType,
-          platform,
-          playbackKey: 1,
-          layout,
-          status: errorMessage ? "error" : "playing",
-          errorMessage: errorMessage ?? undefined,
-        };
-
-        setVideos((prev) => [...prev, video]);
-        setVideoOrderList((prev) => [...prev, { id, url, qnName: quality, layout }]);
-
-        if (layoutModeRef.current === "grid") {
-          setGridLayout((g) => assignVideoToFirstEmpty(g, id));
-        }
-
-        if (errorMessage) showToast(errorMessage);
-      } catch {
-        showToast("网络错误，获取直播流失败");
-      } finally {
-        setIsAddingVideo(false);
-      }
-    },
-    [qnName, showToast, streamType, videoOrderListRef]
-  );
-
-  const refreshVideo = useCallback(
-    async (id: string, options?: { force?: boolean }) => {
-      if (refreshLocks.current.has(id)) return;
-      refreshLocks.current.add(id);
-
-      const target = videos.find((v) => v.id === id);
-      if (!target) {
-        refreshLocks.current.delete(id);
-        return;
-      }
-
-      setVideos((prev) =>
-        prev.map((v) =>
-          v.id === id ? { ...v, isRefreshing: true, status: "loading" } : v
-        )
-      );
-
-      try {
-        const { stream, platform } = await resolveStreamUrl(
-          target.url,
-          target.qnName,
-          target.streamType
-        );
-        const errorMessage = getStreamErrorMessage(stream, platform);
-
-        setVideos((prev) =>
-          prev.map((v) => {
-            if (v.id !== id) return v;
-            if (errorMessage) {
-              return {
-                ...v,
-                isRefreshing: false,
-                status: "error",
-                errorMessage,
-              };
-            }
-            const streamUnchanged = v.stream === stream;
-            return {
-              ...v,
-              stream,
-              playbackKey: streamUnchanged ? v.playbackKey : v.playbackKey + 1,
-              isRefreshing: false,
-              status: "playing",
-              errorMessage: undefined,
-            };
-          })
-        );
-
-        if (errorMessage) showToast(errorMessage);
-        else if (options?.force) showToast("直播流已刷新");
-      } catch {
-        setVideos((prev) =>
-          prev.map((v) =>
-            v.id === id
-              ? {
-                  ...v,
-                  isRefreshing: false,
-                  status: "error",
-                  errorMessage: "刷新失败，请稍后重试",
-                }
-              : v
-          )
-        );
-        showToast("刷新失败，请稍后重试");
-      } finally {
-        refreshLocks.current.delete(id);
-      }
-    },
-    [showToast, videos]
-  );
-
-  const loadVideoList = useCallback(
-    async (list: IVideoOrder[]) => {
-      for (const item of list) {
-        await addVideo(item.url, item.qnName, item.layout, item.id);
-      }
-    },
-    [addVideo]
-  );
-
-  const addDanmaku = useCallback(
-    async (url: string) => {
-      if (!url.trim()) return;
-      setIsAddingDanmaku(true);
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      let ws: IDanmaku["ws"] = null;
-      let roomKey = "";
-
-      try {
-        roomKey = await resolveRoomKey(url);
-        let rid = getLastField(url);
-        if (!isRid(rid)) {
-          const queryObj = parseUrlParams(url);
-          if (queryObj.rid) rid = queryObj.rid;
-        }
-
-        if (url.includes("douyu.com")) {
-          const realRid = roomKey || String(await apiGetDouyuRealRid(rid));
-          ws = new DouyuDanmu(
-            realRid,
-            (msg: string) => {
-              const msgType = getStrMiddle(msg, "type@=", "/");
-              if (msgType === "chatmsg") {
-                const data = deserialize(msg) as {
-                  txt?: string;
-                  col?: string | number;
-                };
-                if (data.txt) {
-                  pushDanmaku(realRid, data.txt, {
-                    color: getDouyuDanmakuColor(data.col),
-                  });
-                }
-              }
-            },
-            () => ws?.close?.()
-          );
-        } else if (url.includes("bilibili.com")) {
-          const realRid = roomKey || String(await apiGetBilibiliRealRid(rid));
-          ws = new LiveWS(Number(realRid));
-          (ws as LiveWS).on("DANMU_MSG", (data: { info: [unknown[], string, unknown[]] }) => {
-            const info = data.info;
-            const colorNum = Number((info[0] as number[])[3]);
-            pushDanmaku(realRid, String(info[1]), {
-              color: `#${colorNum.toString(16)}`,
-            });
-          });
-        } else if (url.includes("huya.com")) {
-          const { channelId, subChannelId } = await apiGetHuyaChannelInfo(rid);
-          ws = window.HuYaListener(channelId, subChannelId, (msg) => {
-            pushDanmaku(roomKey, msg.sContent, {
-              color:
-                msg.tBulletFormat.iFontColor > 0
-                  ? `#${msg.tBulletFormat.iFontColor.toString(16)}`
-                  : "#ffffff",
-            });
-          });
-        }
-        setDanmakuList((prev) => [
-          ...prev,
-          { id, url, rid: String(roomKey), ws },
-        ]);
-      } catch {
-        showToast("弹幕连接失败");
-      } finally {
-        setIsAddingDanmaku(false);
-      }
-    },
-    [pushDanmaku, showToast]
-  );
-
-  const loadDanmakuList = useCallback(
-    async (list: { url: string }[]) => {
-      for (let i = 0; i < list.length; i++) {
-        await addDanmaku(list[i].url);
-        while (danmakuListRef.current.length <= i) {
-          await sleep(300);
-        }
-      }
-    },
-    [addDanmaku, danmakuListRef]
-  );
-
-  useEffect(() => {
-    const init = async () => {
-      const mode =
-        shareLayoutMode ??
-        legacyShowType ??
-        localStorage.getItem("layoutMode") ??
-        localStorage.getItem("showType");
-      setLayoutMode(migrateShowType(mode));
-
-      const savedLineCount =
-        shareLineCount ?? localStorage.getItem("lineCount") ?? "2";
-      setLineCount(Number(savedLineCount));
-
-      const sharedGrid = parseShareGridLayout(shareGrid ?? null);
-      if (sharedGrid) {
-        setGridLayout(sharedGrid);
-      } else {
-        const localGrid = localStorage.getItem("gridLayout");
-        if (localGrid) {
-          try {
-            setGridLayout(JSON.parse(localGrid) as GridLayoutState);
-          } catch {
-            // ignore
-          }
-        }
-      }
-
-      if (shareVideo) {
-        await loadVideoList(parseShareVideoList(shareVideo));
-      } else {
-        const local = localStorage.getItem("videoOrderList");
-        if (local) await loadVideoList(JSON.parse(local) as IVideoOrder[]);
-      }
-
-      if (shareDanmaku) {
-        await loadDanmakuList(parseShareDanmakuList(shareDanmaku));
-      } else {
-        const local = localStorage.getItem("danmakuList");
-        if (local) {
-          try {
-            const parsed = JSON.parse(local) as { url: string }[];
-            if (parsed.length > 0) {
-              await loadDanmakuList(parsed);
-            }
-          } catch {
-            // ignore invalid localStorage
-          }
-        }
-      }
-
-      isAppReadyRef.current = true;
-
-      localStorage.setItem(
-        "danmakuList",
-        JSON.stringify(danmakuListRef.current.map(({ url }) => ({ url })))
-      );
-      localStorage.setItem(
-        "videoOrderList",
-        JSON.stringify(
-          videoOrderListRef.current.map(({ id, url, qnName, layout }) => ({
-            id,
-            url,
-            qnName,
-            layout,
-          }))
-        )
-      );
+    if (!ready) return;
+    let disposed = false, refreshing = false;
+    const refreshFollowed = async () => {
+      if (disposed || refreshing || document.visibilityState === "hidden") return;
+      refreshing = true;
+      const queue = current.current.rooms.filter((room) => room.followed && isPlatformEnabled(room.platform) && room.platform !== "direct").map((room) => room.id);
+      const worker = async () => { while (!disposed && queue.length) { const id = queue.shift(); if (id) await loadMetadata(id); } };
+      try { await Promise.all([worker(), worker(), worker()]); } finally { refreshing = false; }
     };
-    void init();
-  }, [
-    legacyShowType,
-    loadDanmakuList,
-    loadVideoList,
-    shareDanmaku,
-    shareGrid,
-    shareLayoutMode,
-    shareLineCount,
-    shareVideo,
-  ]);
+    void refreshFollowed();
+    const timer = setInterval(() => void refreshFollowed(), 60000);
+    const visible = () => { if (document.visibilityState === "visible") void refreshFollowed(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { disposed = true; clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [followedIds, ready, loadMetadata]);
+
+  const loadStream = useCallback(async (id: string, selection?: StreamSelection, signal?: AbortSignal) => {
+    const target = current.current.videos.find((v) => v.id === id);
+    if (!target || signal?.aborted) return;
+    streamRequests.current.get(id)?.abort();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    streamRequests.current.set(id, controller);
+    const requested = selection ?? { rate: target.preferredRate, qn: target.qnName };
+    send({ type: "video", id, patch: { isRefreshing: true, status: target.stream ? target.status : "loading", errorMessage: undefined } });
+    try {
+      const result = await resolveStreamUrl(target.url, requested.qn, streamType.current, requested.rate, controller.signal);
+      if (controller.signal.aborted || streamRequests.current.get(id) !== controller) return;
+      const active = current.current.videos.find((v) => v.id === id);
+      if (!active) return;
+      const error = getStreamErrorMessage(result.stream, result.platform);
+      if (error) throw new Error(error);
+      if (!applyIdentity(id, { rid: result.rid, platform: result.platform })) return;
+      const key = active.playbackKey + 1;
+      if (selection && active.stream) playbackBackups.current.set(id, { stream: active.stream, qnName: active.qnName, preferredRate: active.preferredRate, selectedQuality: active.selectedQuality, qualities: active.qualities, warning: active.warning, key, expires: Date.now() + 20000 });
+      const playback: PlaybackResult = result;
+      send({ type: "room", id, patch: { qnName: requested.qn, preferredRate: requested.rate } });
+      send({ type: "video", id, patch: { stream: playback.stream, streamType: streamType.current, playbackKey: key, qualities: playback.qualities ?? [], selectedQuality: playback.selectedQuality, warning: playback.warning, isRefreshing: false, status: "loading", errorMessage: undefined } });
+    } catch (error) {
+      if (controller.signal.aborted || streamRequests.current.get(id) !== controller) return;
+      const active = current.current.videos.find((v) => v.id === id);
+      const apiError = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const message = apiError || (error instanceof Error && !error.message.includes("status code") ? error.message : "取流失败，请稍后刷新或检查登录状态");
+      send({ type: "video", id, patch: { isRefreshing: false, status: active?.stream ? active.status : "error", errorMessage: active?.stream ? undefined : message } });
+      notify(`${roomIdentity(target)} · ${active?.stream ? `更新失败，保留原画面：${message}` : message}`);
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      if (streamRequests.current.get(id) === controller) streamRequests.current.delete(id);
+    }
+  }, [applyIdentity, notify, send]);
+
+  // Only newly opened idle videos start a request; geometry/audio changes never refresh streams.
+  useEffect(() => {
+    if (!ready) return;
+    for (const video of state.videos) if (video.status === "idle" && !streamRequests.current.has(video.id)) {
+      void loadMetadata(video.id);
+      void loadStream(video.id);
+    }
+  }, [state.videos, ready, loadMetadata, loadStream]);
 
   useEffect(() => {
-    if (!isAppReadyRef.current) return;
-    localStorage.setItem(
-      "videoOrderList",
-      JSON.stringify(
-        videoOrderList.map(({ id, url, qnName: q, layout }) => ({
-          id,
-          url,
-          qnName: q,
-          layout,
-        }))
-      )
-    );
-  }, [videoOrderList]);
+    const refreshAccount = () => {
+      for (const video of current.current.videos) if (video.platform === "douyu") {
+        recoveryRequests.current.get(video.id)?.abort(); recoveryRequests.current.delete(video.id);
+        send({ type: "video", id: video.id, patch: { recoveryKey: video.recoveryKey + 1, recoveryStopped: false } });
+        void loadStream(video.id);
+      }
+      notify("斗鱼登录状态已更新，正在重新获取直播画质");
+    };
+    const storageChanged = (event: StorageEvent) => { if (event.key === "uni-live.douyu-cookie") refreshAccount(); };
+    window.addEventListener(DOUYU_COOKIE_EVENT, refreshAccount);
+    window.addEventListener("storage", storageChanged);
+    return () => { window.removeEventListener(DOUYU_COOKIE_EVENT, refreshAccount); window.removeEventListener("storage", storageChanged); };
+  }, [loadStream, notify, send]);
 
   useEffect(() => {
-    if (!isAppReadyRef.current) return;
-    localStorage.setItem(
-      "danmakuList",
-      JSON.stringify(danmakuList.map(({ url }) => ({ url })))
-    );
-  }, [danmakuList]);
+    const suspend = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) return;
+      for (const [id, controller] of recoveryRequests.current) { controller.abort(); send({ type: "video", id, patch: { isRefreshing: false } }); }
+      recoveryRequests.current.clear();
+    };
+    document.addEventListener("visibilitychange", suspend);
+    window.addEventListener("offline", suspend);
+    return () => { document.removeEventListener("visibilitychange", suspend); window.removeEventListener("offline", suspend); };
+  }, [send]);
 
   useEffect(() => {
-    if (!isAppReadyRef.current) return;
-    localStorage.setItem("layoutMode", layoutMode);
-  }, [layoutMode]);
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || document.fullscreenElement || settings || (event.target as HTMLElement)?.closest("input, textarea, select")) return;
+      if (drawer) setDrawer(false);
+      else send({ type: "focus", id: null });
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [drawer, settings, send]);
 
   useEffect(() => {
-    if (!isAppReadyRef.current) return;
-    localStorage.setItem("lineCount", String(lineCount));
-  }, [lineCount]);
-
-  useEffect(() => {
-    if (!isAppReadyRef.current) return;
-    localStorage.setItem("gridLayout", JSON.stringify(gridLayout));
-  }, [gridLayout]);
-
-  useEffect(() => {
-    localStorage.setItem("danmakuSpeed", String(danmakuSpeed));
-  }, [danmakuSpeed]);
-
-  useEffect(() => {
-    localStorage.setItem("danmakuOpacity", String(danmakuOpacity));
-  }, [danmakuOpacity]);
-
-  useEffect(() => {
-    localStorage.setItem("danmakuDensity", String(danmakuDensity));
-  }, [danmakuDensity]);
-
-  useEffect(() => {
-    localStorage.setItem("danmakuDisplayMode", danmakuDisplayMode);
-  }, [danmakuDisplayMode]);
-
-  const videoIdsKey = useMemo(
-    () => videos.map((v) => v.id).join("|"),
-    [videos]
-  );
-
-  useEffect(() => {
-    if (layoutMode !== "grid") return;
-    const videoIds = videoIdsKey ? videoIdsKey.split("|") : [];
-    setGridLayout((g) => {
-      const next = reconcileGridWithVideos(g, videoIds);
-      return isSameGridState(g, next) ? g : next;
-    });
-  }, [layoutMode, videoIdsKey]);
-
-  const handleLayoutChange = useCallback((id: string, layout: IVideo["layout"]) => {
-    setVideos((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, layout } : v))
-    );
-    setVideoOrderList((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, layout } : v))
-    );
+    const streams = streamRequests.current, metadata = metadataRequests.current;
+    const recoveries = recoveryRequests.current;
+    return () => {
+      refreshAllActive.current = false;
+      for (const controller of streams.values()) controller.abort();
+      for (const controller of metadata.values()) controller.abort();
+      for (const controller of recoveries.values()) controller.abort();
+      addRequest.current?.abort();
+      streams.clear(); metadata.clear(); clearTimeout(toastTimer.current); clearTimeout(undoTimer.current);
+    };
   }, []);
 
-  const handleToggleVisible = useCallback((id: string) => {
-    const toggle = (layout: IVideo["layout"]) => ({
-      ...layout,
-      visible: !layout.visible,
-    });
-    setVideos((prev) =>
-      prev.map((v) => (v.id === id ? { ...v, layout: toggle(v.layout) } : v))
-    );
-    setVideoOrderList((prev) =>
-      prev.map((v) =>
-        v.id === id && v.layout ? { ...v, layout: toggle(v.layout) } : v
-      )
-    );
-  }, []);
-
-  const handleBringToFront = useCallback((id: string) => {
-    setVideos((prev) => {
-      const maxZ = Math.max(...prev.map((v) => v.layout.zIndex), 0);
-      return prev.map((v) =>
-        v.id === id ? { ...v, layout: { ...v.layout, zIndex: maxZ + 1 } } : v
-      );
-    });
-  }, []);
-
-  const handleRemoveVideo = useCallback((id: string) => {
-    setVideos((prev) => prev.filter((v) => v.id !== id));
-    setVideoOrderList((prev) => prev.filter((v) => v.id !== id));
-    setGridLayout((g) => removeVideoFromGrid(g, id));
-  }, []);
-
-  const handleCopyStream = useCallback(
-    async (id: string) => {
-      const video = videos.find((v) => v.id === id);
-      if (!video?.stream) return;
-      const ok = await copyText(video.stream);
-      showToast(ok ? "已复制直播流地址" : "复制失败");
-    },
-    [showToast, videos]
-  );
-
-  const handleShare = useCallback(async () => {
-    const url = buildShareUrl(
-      location.origin,
-      videoOrderList,
-      danmakuList.map(({ url }) => ({ url })),
-      layoutMode,
-      lineCount,
-      layoutMode === "grid" ? gridLayout : undefined
-    );
-    const ok = await copyText(url);
-    showToast(ok ? "分享链接已复制" : "复制失败");
-  }, [danmakuList, gridLayout, layoutMode, lineCount, showToast, videoOrderList]);
-
-  const effectiveLayoutMode: LayoutMode =
-    isMobile && layoutMode === "free" ? "equal" : layoutMode;
-
-  const danmakuLayerProps = {
-    opacity: danmakuOpacity,
-    density: danmakuDensity,
-    speed: danmakuSpeed,
+  const openRoom = (id: string) => {
+    const room = current.current.rooms.find((r) => r.id === id);
+    if (!room || !isPlatformEnabled(room.platform)) return;
+    dismissUndo();
+    if (!current.current.videos.some((v) => v.id === id)) send({ type: "open", id, layout: current.current.manual && room?.layout ? room.layout : insertionLayout(current.current.videos.map((v) => v.layout), size) });
+    if (mobile) setDrawer(false);
+  };
+  const addRoom = async (url: string) => {
+    if (addRequest.current) return false;
+    const controller = new AbortController();
+    addRequest.current = controller;
+    setAdding(true);
+    try {
+      let room: FollowedRoom = { ...createRoom(url), qnName: quality };
+      assertPlatformEnabled(room.platform);
+      if (room.platform !== "direct") {
+        const info = await apiGetRoomInfo(room.platform, room.rid, controller.signal);
+        if (controller.signal.aborted) return false;
+        room = { ...room, ...info, lastStatusAt: Date.now() };
+      }
+      dismissUndo();
+      const existing = current.current.rooms.find((r) => roomIdentity(r) === roomIdentity(room));
+      if (!existing) send({ type: "add", room });
+      else if (room.platform !== "direct") send({ type: "room", id: existing.id, patch: { platform: room.platform, rid: room.rid, anchorName: room.anchorName, title: room.title, avatarUrl: room.avatarUrl, liveStatus: room.liveStatus, lastStatusAt: room.lastStatusAt } });
+      if (room.platform !== "direct") send({ type: "visited", id: existing?.id ?? room.id, at: Date.now() });
+      if (room.liveStatus === false) { notify(`${roomLabel(room)} · 未开播，已保存到历史`); return "history" as const; }
+      openRoom(existing?.id ?? room.id);
+      if (existing) notify("已定位到这个直播间");
+      return "layout" as const;
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const apiError = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        notify(apiError || (error instanceof Error && !error.message.includes("status code") && !error.message.includes("timeout") ? error.message : "暂时无法验证房间，请稍后重试"));
+      }
+      return false;
+    } finally { addRequest.current = null; if (!controller.signal.aborted) setAdding(false); }
+  };
+  const changeFollow = (id: string, followed: boolean) => {
+    const room = current.current.rooms.find((room) => room.id === id);
+    if (!room || room.followed === followed) return;
+    dismissUndo();
+    send({ type: "follow", id, followed });
+    if (!followed) {
+      setUnfollowedRoom({ ...room });
+      undoTimer.current = setTimeout(() => setUnfollowedRoom(null), 8000);
+    }
+  };
+  const undoUnfollow = () => {
+    if (!unfollowedRoom) return;
+    send({ type: "restore-follow", room: unfollowedRoom });
+    dismissUndo();
+  };
+  const arrange = () => send({ type: "arrange", layouts: arrangeByPosition(current.current.videos, size) });
+  const closeAll = async () => {
+    if (!current.current.videos.length) return;
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); }
+      catch { notify("无法退出全屏，请退出全屏后关闭全部画面"); return; }
+    }
+    const backup = { rooms: current.current.videos.map((video) => ({ ...current.current.rooms.find((room) => room.id === video.id)!, layout: { ...video.layout } })), manual: current.current.manual };
+    if (!backup.rooms.length) return;
+    dismissUndo();
+    for (const controller of recoveryRequests.current.values()) controller.abort();
+    recoveryRequests.current.clear();
+    for (const controller of streamRequests.current.values()) controller.abort();
+    streamRequests.current.clear(); playbackBackups.current.clear();
+    send({ type: "close-all" });
+    for (const [id, controller] of metadataRequests.current) if (!current.current.rooms.some((room) => room.id === id)) { controller.abort(); metadataRequests.current.delete(id); }
+    clearTimeout(toastTimer.current); setToast(null);
+    clearTimeout(undoTimer.current); setClosedRooms(backup);
+    undoTimer.current = setTimeout(() => setClosedRooms(null), 8000);
+  };
+  const undoCloseAll = () => {
+    if (!closedRooms || current.current.videos.length) return;
+    send({ type: "restore-closed", ...closedRooms });
+    dismissUndo();
+    notify("已恢复布局，正在重新连接直播");
+  };
+  const cleanTemporary = () => {
+    const temporary = current.current.videos.filter((video) => !video.followed);
+    if (!temporary.length) return;
+    send({ type: "focus", id: null });
+    for (const video of temporary) stopWatching(video.id);
+    arrange();
+    notify(`已关闭 ${temporary.length} 个临时房间，剩余画面已整理`);
+  };
+  const toggleMute = (id: string) => {
+    const video = current.current.videos.find((v) => v.id === id);
+    if (!video) return;
+    const turnOn = video.muted || video.volume === 0;
+    send({ type: "audio", id, muted: !turnOn, volume: turnOn ? video.volume || video.lastVolume || 0.5 : video.volume });
+  };
+  const refresh = (id: string, rate?: number, qn?: IQnType) => {
+    if (streamRequests.current.has(id)) return;
+    const video = current.current.videos.find((video) => video.id === id);
+    if (!video) return;
+    recoveryRequests.current.get(id)?.abort();
+    recoveryRequests.current.delete(id);
+    send({ type: "video", id, patch: { recoveryKey: video.recoveryKey + 1, recoveryStopped: false } });
+    if (rate !== undefined || qn !== undefined) void loadStream(id, { rate, qn: qn ?? "原画" });
+    else { void loadMetadata(id); void loadStream(id); }
+  };
+  const refreshAll = async () => {
+    if (refreshAllActive.current) return;
+    refreshAllActive.current = true;
+    setRefreshingAll(true);
+    const queue = current.current.rooms.filter((room) => isPlatformEnabled(room.platform) && (room.followed || current.current.videos.some((video) => video.id === room.id))).map((room) => room.id);
+    const worker = async () => {
+      while (refreshAllActive.current && queue.length) {
+        const id = queue.shift()!;
+        const watching = current.current.videos.some((video) => video.id === id);
+        const video = current.current.videos.find((video) => video.id === id);
+        if (video) { recoveryRequests.current.get(id)?.abort(); recoveryRequests.current.delete(id); send({ type: "video", id, patch: { recoveryKey: video.recoveryKey + 1, recoveryStopped: false } }); }
+        await Promise.all([loadMetadata(id), ...(watching ? [loadStream(id)] : [])]);
+      }
+    };
+    try { await Promise.all([worker(), worker(), worker()]); }
+    finally { refreshAllActive.current = false; setRefreshingAll(false); }
+  };
+  const playbackError = (id: string, key: number, message: string) => {
+    const video = current.current.videos.find((v) => v.id === id);
+    if (!video || video.playbackKey !== key) return;
+    const backup = playbackBackups.current.get(id);
+    playbackBackups.current.delete(id);
+    if (backup && backup.key === key && backup.expires >= Date.now()) {
+      const original = { stream: backup.stream, qnName: backup.qnName, preferredRate: backup.preferredRate, selectedQuality: backup.selectedQuality, qualities: backup.qualities, warning: backup.warning };
+      send({ type: "room", id, patch: { qnName: original.qnName, preferredRate: original.preferredRate } });
+      send({ type: "video", id, patch: { ...original, playbackKey: key + 1, status: "loading", errorMessage: undefined } });
+      notify("所选画质无法播放，已恢复原画质");
+    } else send({ type: "video", id, patch: { status: "error", errorMessage: message } });
+  };
+  const shareCurrent = async () => {
+    const copied = await copyText(shareWorkspace(location.origin, workspaceSnapshot(current.current)));
+    notify(copied ? "当前观看的分享链接已复制" : "复制失败，请检查浏览器剪贴板权限");
+  };
+  const changeAutoFocusAudio = (enabled: boolean) => { setAutoFocusAudio(enabled); send({ type: "audio-policy", enabled }); };
+  const changeRecovery = (value: RecoveryPreferences) => {
+    setRecovery(normalizeRecoveryPreferences(value));
+    for (const [id, controller] of recoveryRequests.current) { controller.abort(); send({ type: "video", id, patch: { isRefreshing: false } }); }
+    recoveryRequests.current.clear();
+  };
+  const recoveryEvent = async (id: string, key: number, event: RecoveryEvent) => {
+    const video = current.current.videos.find((video) => video.id === id);
+    if (!video || video.playbackKey !== key || !recoveryPreferences.current.enabled) return;
+    if (event === "recovered") { send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); return; }
+    if (event === "exhausted") { send({ type: "video", id, patch: { status: "error", errorMessage: `自动恢复已尝试 ${recoveryPreferences.current.maxAttempts} 次，请手动重试` } }); return; }
+    if (video.paused || video.isRefreshing || streamRequests.current.has(id) || recoveryRequests.current.has(id) || document.visibilityState !== "visible" || !navigator.onLine) return;
+    const controller = new AbortController();
+    recoveryRequests.current.set(id, controller);
+    send({ type: "video", id, patch: { isRefreshing: true } });
+    try {
+      const info = await loadMetadata(id, controller.signal);
+      const active = current.current.videos.find((video) => video.id === id);
+      if (controller.signal.aborted || !active || active.playbackKey !== key || active.paused || document.visibilityState !== "visible" || !navigator.onLine) return;
+      if (info?.liveStatus === false) { send({ type: "video", id, patch: { recoveryStopped: true, status: "error", errorMessage: "主播已下播，已停止自动恢复" } }); return; }
+      await loadStream(id, undefined, controller.signal);
+    } finally {
+      if (recoveryRequests.current.get(id) === controller) { recoveryRequests.current.delete(id); send({ type: "video", id, patch: { isRefreshing: false } }); }
+    }
+  };
+  const sidebarProps = {
+    rooms: state.rooms.filter((room) => isPlatformEnabled(room.platform)), videos: state.videos, collapsed: mobile ? false : collapsed, adding, focused: Boolean(state.focus), view: libraryView, onViewChange: setLibraryView,
+    onCollapse: (value: boolean) => mobile ? setDrawer(!value) : setCollapsed(value), onAdd: addRoom, onOpen: openRoom,
+    onClose: stopWatching, onCloseAll: () => void closeAll(), onFollow: changeFollow,
+    onForget: (id: string) => { dismissUndo(); send({ type: "forget", id }); }, onClearHistory: () => { dismissUndo(); send({ type: "clear-history" }); },
+    onArrange: arrange, onMuteAll: () => send({ type: "mute-all" }), onClean: cleanTemporary, onExitFocus: () => send({ type: "focus", id: null }),
+    onSettings: () => { setSettings(true); setDrawer(false); },
+    onReorder: (from: string, to: string) => send({ type: "reorder-followed", from, to }),
+    refreshingAll, onRefreshAll: () => void refreshAll(),
   };
 
-  return (
-    <div className="relative h-dvh w-full overflow-hidden bg-background text-foreground">
-      {danmakuDisplayMode === "merged" ? (
-        <DanmakuLayer ref={danmakuRef} {...danmakuLayerProps} />
-      ) : (
-        <DanmakuLayer
-          ref={fallbackDanmakuRef}
-          {...danmakuLayerProps}
-          className="pointer-events-none absolute inset-0 z-40"
-        />
-      )}
-
-      <main className="absolute inset-0">
-        {videos.length === 0 && layoutMode !== "grid" ? (
-          <EmptyState
-            onOpenSettings={() =>
-              openSettings({ tab: "video", subTab: "add" })
-            }
-          />
-        ) : layoutMode === "grid" ? (
-          <GridLayoutCanvas
-            videos={videos}
-            grid={gridLayout}
-            onGridChange={setGridLayout}
-            danmakuDisplayMode={danmakuDisplayMode}
-            danmakuOpacity={danmakuOpacity}
-            danmakuDensity={danmakuDensity}
-            danmakuSpeed={danmakuSpeed}
-            onVideoDanmakuRef={registerVideoDanmaku}
-            onRefresh={refreshVideo}
-            onToggleVisible={handleToggleVisible}
-            onRemove={handleRemoveVideo}
-            onCopyStream={handleCopyStream}
-            onOpenSettings={() =>
-              openSettings({ tab: "video", subTab: "add" })
-            }
-          />
-        ) : (
-          <FreeLayoutCanvas
-            videos={videos}
-            layoutMode={effectiveLayoutMode}
-            lineCount={lineCount}
-            danmakuDisplayMode={danmakuDisplayMode}
-            danmakuOpacity={danmakuOpacity}
-            danmakuDensity={danmakuDensity}
-            danmakuSpeed={danmakuSpeed}
-            onVideoDanmakuRef={registerVideoDanmaku}
-            onLayoutChange={handleLayoutChange}
-            onRefresh={refreshVideo}
-            onToggleVisible={handleToggleVisible}
-            onBringToFront={handleBringToFront}
-            onRemove={handleRemoveVideo}
-            onCopyStream={handleCopyStream}
-          />
-        )}
-      </main>
-
-      {!isDockClosed ? (
-        <ControlDock
-          displayState={dockDisplayState}
-          onExpand={() => setDockDisplayState("expanded")}
-          onCollapse={() => setDockDisplayState("collapsed")}
-          onClose={() => setIsDockClosed(true)}
-          onOpenSettings={() =>
-            openSettings({ tab: "video", subTab: "add" })
-          }
-          onShare={handleShare}
-          layoutMode={layoutMode}
-          videoCount={videos.length}
-          danmakuCount={danmakuList.length}
-        />
-      ) : null}
-
-      <SettingsPanel
-        open={isSettingsOpen}
-        onClose={closeSettings}
-        focus={settingsFocus}
-        layoutMode={layoutMode}
-        onLayoutModeChange={setLayoutMode}
-        lineCount={lineCount}
-        onLineCountChange={setLineCount}
-        qnName={qnName}
-        onQnNameChange={setQnName}
-        onAddVideo={addVideo}
-        isAddingVideo={isAddingVideo}
-        videos={videos}
-        videoOrderList={videoOrderList}
-        onMoveVideoUp={(index) =>
-          setVideoOrderList((list) => arrayMoveUp(list, index))
-        }
-        onMoveVideoDown={(index) =>
-          setVideoOrderList((list) => arrayMoveDown(list, index))
-        }
-        onRemoveVideo={handleRemoveVideo}
-        onRefreshVideo={refreshVideo}
-        onToggleVisible={handleToggleVisible}
-        onCopyStream={handleCopyStream}
-        danmakuList={danmakuList}
-        onAddDanmaku={addDanmaku}
-        isAddingDanmaku={isAddingDanmaku}
-        onRemoveDanmaku={(id) => {
-          const item = danmakuList.find((d) => d.id === id);
-          item?.ws?.close?.();
-          setDanmakuList((prev) => prev.filter((d) => d.id !== id));
-        }}
-        danmakuOpacity={danmakuOpacity}
-        onDanmakuOpacityChange={setDanmakuOpacity}
-        danmakuDensity={danmakuDensity}
-        onDanmakuDensityChange={setDanmakuDensity}
-        danmakuSpeed={danmakuSpeed}
-        onDanmakuSpeedChange={setDanmakuSpeed}
-        danmakuDisplayMode={danmakuDisplayMode}
-        onDanmakuDisplayModeChange={setDanmakuDisplayMode}
-        streamType={streamType}
-        gridLayout={gridLayout}
-        onGridChange={setGridLayout}
-      />
-
-      {toast ? (
-        <div
-          role="status"
-          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-surface-elevated px-4 py-2 text-sm shadow-lg"
-        >
-          {toast}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function EmptyState({ onOpenSettings }: { onOpenSettings: () => void }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <h1 className="font-display text-2xl text-foreground">DouyuEx联播</h1>
-      <p className="max-w-md text-sm text-muted">
-        添加斗鱼、B站或虎牙直播间，使用自由布局同时观看多个直播。
-      </p>
-      <button
-        type="button"
-        onClick={onOpenSettings}
-        className="flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
-      >
-        <Plus size={18} weight="bold" />
-        添加第一个直播
-      </button>
-    </div>
-  );
+  return <div className="live-workspace">
+    <div className={`sidebar-container ${drawer ? "drawer-open" : ""}`}><RoomSidebar {...sidebarProps} /></div>
+    {mobile && drawer && <button className="sidebar-scrim" aria-label="关闭房间列表" onClick={() => setDrawer(false)} />}
+    {mobile && !drawer && <button className="mobile-sidebar-toggle" aria-label="打开房间列表" onClick={() => setDrawer(true)}><SidebarSimple size={20} /></button>}
+    <main className="workspace-main">
+      <div className="workspace-canvas" ref={canvas} tabIndex={0} aria-label="直播布局"
+        onPointerDownCapture={(event) => { if (!(event.target as HTMLElement).closest("button, input, textarea, select, a, [contenteditable], [role='dialog'], [role='menu']")) event.currentTarget.focus({ preventScroll: true }); }}
+        onKeyDown={(event) => {
+          if (event.key.toLowerCase() === "r" && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !settings && !(event.target as HTMLElement).closest("input, textarea, select, [contenteditable], [role='dialog'], [role='menu']")) { event.preventDefault(); arrange(); }
+        }}>
+        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} size={size} danmaku={danmaku}
+          onFullscreenChange={(id, active) => send({ type: "fullscreen", id, active, autoAudio: autoFocusAudio })}
+          onLayout={(id, layout) => send({ type: "layout", id, layout })} onRaise={(id) => send({ type: "raise", id })} onFocus={(id) => send({ type: "focus", id, autoAudio: autoFocusAudio })} onMute={toggleMute}
+          onAudio={(id, muted, volume) => send({ type: "audio", id, muted, volume })} onClose={stopWatching} onRefresh={refresh}
+          onDanmaku={(id) => { const video = current.current.videos.find((v) => v.id === id); if (video) send({ type: "room", id, patch: { danmakuEnabled: !video.danmakuEnabled } }); }}
+          onFollow={changeFollow} recovery={recovery} onRecoveryEvent={(id, key, event) => void recoveryEvent(id, key, event)}
+          onPlaybackError={playbackError} onPaused={(id, paused) => send({ type: "video", id, patch: { paused } })}
+          onReady={(id, key) => { const video = current.current.videos.find((video) => video.id === id); if (video?.playbackKey === key && video.paused) send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); }}
+          onPlaying={(id, key) => { if (current.current.videos.find((video) => video.id === id)?.playbackKey !== key) return; send({ type: "video", id, patch: { paused: false, status: "playing", errorMessage: undefined } }); send({ type: "played", id, at: Date.now() }); }} />
+          : <div className="workspace-empty"><div className="empty-icon"><SquaresFour size={30} weight="light" /></div>
+            <span className="empty-eyebrow">YOUR LIVE DESK</span><h1>把喜欢的直播，放在一起</h1>
+            <button className="primary-button" onClick={() => { if (mobile) setDrawer(true); else setCollapsed(false); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="直播间地址"]')?.focus()); }}><Plus size={17} />添加第一个房间</button>
+          </div>}
+      </div>
+    </main>
+    <SettingsPanel open={settings} onClose={() => setSettings(false)} quality={quality} onQualityChange={setQuality} danmaku={danmaku} onDanmakuChange={setDanmaku} autoFocusAudio={autoFocusAudio} onAutoFocusAudioChange={changeAutoFocusAudio} recovery={recovery} onRecoveryChange={changeRecovery} onShare={() => void shareCurrent()} hasVideos={state.videos.length > 0} />
+    {(toast || closedRooms || unfollowedRoom) && <div role="status" className="workspace-toast">{unfollowedRoom ? <><span>已取消关注 {roomLabel(unfollowedRoom)}</span><button type="button" className="toast-undo" onClick={undoUnfollow}>撤销</button></> : closedRooms ? <><span>已关闭 {closedRooms.rooms.length} 个画面</span><button type="button" className="toast-undo" onClick={undoCloseAll}>撤销</button></> : toast}</div>}
+  </div>;
 }

@@ -36,11 +36,12 @@ interface DanmakuLayerProps {
   opacity: number;
   density: number;
   speed: number;
+  fontSize?: number;
   className?: string;
 }
 
 export const DanmakuLayer = forwardRef<DanmakuLayerHandle, DanmakuLayerProps>(
-  function DanmakuLayer({ opacity, density, speed, className }, ref) {
+  function DanmakuLayer({ opacity, density, speed, fontSize = 20, className }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<DanmakuEngine | null>(null);
     const pendingRef = useRef<{ text: string; opts?: DanmakuPushOptions }[]>(
@@ -67,6 +68,7 @@ export const DanmakuLayer = forwardRef<DanmakuLayerHandle, DanmakuLayerProps>(
         opacity: opacity / 100,
         density,
         speed,
+        fontSize,
       };
       engineRef.current = new DanmakuEngine(container, options);
 
@@ -94,6 +96,10 @@ export const DanmakuLayer = forwardRef<DanmakuLayerHandle, DanmakuLayerProps>(
     useLayoutEffect(() => {
       engineRef.current?.setSpeed(speed);
     }, [speed]);
+
+    useLayoutEffect(() => {
+      engineRef.current?.setFontSize(fontSize);
+    }, [fontSize]);
 
     return (
       <div

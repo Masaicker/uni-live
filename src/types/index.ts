@@ -6,6 +6,86 @@ export type DanmakuDisplayMode = "merged" | "independent";
 export type Platform = "douyu" | "bilibili" | "huya" | "direct" | "unknown";
 export type VideoStatus = "idle" | "loading" | "playing" | "error";
 
+export interface QualityOption {
+  name: string;
+  rate: number;
+  bit?: number;
+}
+
+export interface PlaybackResult {
+  stream: string;
+  qualities?: QualityOption[];
+  selectedQuality?: QualityOption;
+  requestedRate?: number;
+  warning?: string;
+}
+
+export interface RoomInfo {
+  platform: Platform;
+  rid: string;
+  anchorName: string;
+  title: string;
+  liveStatus: boolean | null;
+  avatarUrl?: string;
+}
+
+export interface FollowedRoom extends RoomInfo {
+  id: string;
+  url: string;
+  followed: boolean;
+  followOrder?: number;
+  lastWatchedAt?: number;
+  lastStatusAt?: number;
+  qnName: IQnType;
+  preferredRate?: number;
+  danmakuEnabled: boolean;
+  volume: number;
+  lastVolume: number;
+  layout?: VideoLayout;
+}
+
+export type DanmakuStatus = "disabled" | "connecting" | "connected" | "error" | "unsupported";
+
+export interface MonitorVideo extends FollowedRoom {
+  stream: string;
+  streamType: IStreamType;
+  playbackKey: number;
+  layout: VideoLayout;
+  status: VideoStatus;
+  muted: boolean;
+  paused: boolean;
+  qualities: QualityOption[];
+  selectedQuality?: QualityOption;
+  warning?: string;
+  errorMessage?: string;
+  isRefreshing: boolean;
+  recoveryKey: number;
+  recoveryStopped?: boolean;
+}
+
+export interface FocusSession {
+  id: string;
+  muted: boolean;
+  volume: number;
+  adjusted: boolean;
+  autoAudio: boolean;
+}
+
+export interface MonitorState {
+  rooms: FollowedRoom[];
+  videos: MonitorVideo[];
+  manual: boolean;
+  focus: FocusSession | null;
+  fullscreen: FocusSession | null;
+}
+
+export interface WorkspaceSnapshot {
+  version: 3;
+  rooms: FollowedRoom[];
+  openIds: string[];
+  manual: boolean;
+}
+
 export interface VideoLayout {
   x: number;
   y: number;

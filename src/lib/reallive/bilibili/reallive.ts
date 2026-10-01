@@ -1,64 +1,56 @@
 import axios from "axios";
 import type { IQnType, IStreamType } from "@/types";
 
-const QN_BILIBILI = {
-  原画: "20000",
-  蓝光: "400",
-  超清: "250",
-  高清: "150",
-  流畅: "80"
-};
+const QN_BILIBILI: Record<IQnType, number> = { 原画: 20000, 蓝光: 400, 超清: 250, 高清: 150, 流畅: 80 };
+interface BilibiliPlayResponse {
+  code?: number;
+  data?: {
+    live_status?: number;
+    durl?: { url?: string }[];
+    playurl_info?: { playurl?: { stream?: {
+      format?: { format_name?: string; codec?: {
+        codec_name?: string; base_url?: string; url_info?: { host?: string; extra?: string }[];
+      }[] }[];
+    }[] } };
+  };
+}
 
-// export function getRealLive_Bilibili(
-//   room_id: string,
-//   qn: IQnType,
-//   type: IStreamType
-// ): Promise<string> {
-//   return new Promise((resolve, reject) => {
-//     axios.get(
-//       `https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id=${room_id}&protocol=0,1&format=0,1,2&codec=0,1&qn=${QN_BILIBILI[qn]}&platform=h5&ptype=8`,
-//     )
-//       .then((res) => {
-//         let ret = res.data;
-//         let rurl = "";
-//         let streamList = ret.data?.playurl_info?.playurl?.stream;
-//         if (streamList) {
-//           let hlsInfo = streamList.length > 0 ? streamList[type === "flv" ? 0 : streamList.length - 1]?.format[0]?.codec[0] : null;
-//           if (hlsInfo) {
-//             rurl = `${hlsInfo?.url_info[0]?.host}${hlsInfo?.base_url}${hlsInfo?.url_info[0]?.extra}`;
-//           }
-//         }
-//         resolve(rurl);
-//       })
-//       .catch((err) => {
-//         reject(err);
-//       });
-//   });
-// }
+export function selectBilibiliStreams(response: BilibiliPlayResponse, type: IStreamType): string[] {
+  const candidates: { url: string; format: string }[] = [];
+  for (const stream of response.data?.playurl_info?.playurl?.stream ?? []) {
+    for (const format of stream.format ?? []) {
+      for (const codec of format.codec ?? []) {
+        if (codec.codec_name && !["avc", "h264"].includes(codec.codec_name)) continue;
+        for (const info of codec.url_info ?? []) {
+          if (/^https?:\/\//i.test(info.host ?? "") && codec.base_url) candidates.push({ url: `${info.host}${codec.base_url}${info.extra ?? ""}`, format: format.format_name ?? "" });
+        }
+      }
+    }
+  }
+  const priority = (format: string) => type === "flv" ? format === "flv" ? 0 : 1 : format === "ts" ? 0 : format !== "flv" ? 1 : 2;
+  candidates.sort((a, b) => priority(a.format) - priority(b.format) || Number(a.url.includes("mcdn")) - Number(b.url.includes("mcdn")));
+  const urls = candidates.map((item) => item.url);
+  if (!urls.length) for (const item of response.data?.durl ?? []) if (/^https?:\/\//i.test(item.url ?? "")) urls.push(item.url!);
+  return [...new Set(urls)];
+}
 
-export function getRealLive_Bilibili(room_id: string, qn: IQnType, _type: IStreamType): Promise<string> {
-  return new Promise((resolve, reject) => {
-    axios
-      .get(`https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id=${room_id}&platform=web&qn=${QN_BILIBILI[qn]}&protocol=0,1&format=0,1,2&codec=0,1`)
-      .then((res) => {
-        const ret = res.data;
-        let rurl = "";
-        for (let i = 0; i < ret.data.playurl_info.playurl.stream.length; i++) {
-          const item = ret.data.playurl_info.playurl.stream[i];
-          if (String(item.protocol_name).includes("hls") && item.format.length > 0) {
-            const url_info = item.format[0].codec[0].url_info[0];
-            const base_url = item.format[0].codec[0].base_url;
-            rurl = `${url_info.host}${base_url}${url_info.extra}`;
-          }
-        }
-        const streamList = ret.data?.durl;
-        if (streamList) {
-          rurl = streamList.length > 0 ? streamList[0].url : "";
-        }
-        resolve(rurl);
-      })
-      .catch((err) => {
-        reject(err);
-      });
-  });
+export function selectBilibiliStream(response: BilibiliPlayResponse, type: IStreamType): string {
+  return selectBilibiliStreams(response, type)[0] ?? "";
+}
+
+export async function getRealLive_Bilibili(roomId: string, qn: IQnType, type: IStreamType): Promise<string> {
+  let response: BilibiliPlayResponse;
+  try {
+    const result = await axios.get<BilibiliPlayResponse>("https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo", {
+      proxy: false, timeout: 15000,
+      params: { room_id: roomId, platform: "web", qn: QN_BILIBILI[qn], protocol: "0,1", format: "0,1,2", codec: "0" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36", Referer: `https://live.bilibili.com/${roomId}` },
+    });
+    response = result.data;
+  } catch { throw new Error("哔哩哔哩播放接口连接失败或超时，请稍后刷新"); }
+  if (response?.code !== 0) throw new Error("哔哩哔哩播放接口拒绝请求，请稍后刷新或尝试其他画质");
+  if (response.data?.live_status === 0) throw new Error("哔哩哔哩房间尚未开播");
+  const stream = selectBilibiliStream(response, type);
+  if (!stream) throw new Error("哔哩哔哩未返回可播放的 H.264 直播流，请确认房间已开播或切换画质");
+  return stream;
 }

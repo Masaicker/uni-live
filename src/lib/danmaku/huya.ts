@@ -5587,7 +5587,7 @@ TafMx.UriMapping = {
     };
 function TafHandler() {
     function e() {
-        var e = "ws://ws.api.huya.com:80";
+        var e = "wss://cdnws.api.huya.com";
         // console.info("%cconnecting " + e, c("#0000E3")),
             s = new WebSocket(e),
             s.onopen = t,
@@ -5599,16 +5599,25 @@ function TafHandler() {
         s.send(e)
     }
     this.close = function () {
+        clearInterval(heartbeatTimer);
+        closed = true;
         s.close();
         // console.log("ws closed")
     }
     function t() {
+        if (closed) return;
+        heartbeatTimer = setInterval(function () {
+            if (s.readyState === WebSocket.OPEN) s.send(Uint8Array.from(atob("ABQdAAwsNgBM"), function (c) { return c.charCodeAt(0); }));
+        }, 60000);
         // console.log("=== WebSocket Connected ==="),
             f = 0,
             i.connected = !0,
             i.dispatch("WEBSOCKET_CONNECTED")
     }
     function a(n) {
+        clearInterval(heartbeatTimer);
+        i.connected = !1;
+        i.dispatch("WEBSOCKET_CLOSED");
         return;
         i.connected = !1,
             console.warn("%c=== WebSocket Closed ===", "font-size:120%", n),
@@ -5617,6 +5626,7 @@ function TafHandler() {
                     setTimeout(e, 1e3)) : console.warn("%c=== WebSocket重连次数超标 ===", "font-size:120%")
     }
     function o(e) {
+        i.dispatch("WEBSOCKET_ERROR", e);
         // console.warn("%c=== WebSocket Error ===", "font-size:120%", e)
     }
     function r(e) {
@@ -5679,7 +5689,7 @@ function TafHandler() {
         return "color:" + e + ";font-weight:900"
     }
     this.connected = !1;
-    var s, i = this, f = 0;
+    var s, i = this, f = 0, heartbeatTimer, closed = false;
     e(),
         this.sendWup = function(e, t, a) {
             var o = new Taf.Wup;
@@ -5740,17 +5750,10 @@ function TafHandler() {
 };
 
 
-var G = {
-        topsid: "0",
-        subsid: "0",
-        yyuid: "0"
-    };
-
 function HuYaListener(topsid,subsid,msgHandler) {
 
 
-    G.topsid = topsid;
-    G.subsid = subsid;
+    var G = { topsid: topsid, subsid: subsid, yyuid: "0" };
 
     function t() {
         var n = new HUYA.LiveLaunchReq;

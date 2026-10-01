@@ -1,25 +1,29 @@
-import type { IQnType, IStreamType, Platform } from "@/types";
+import type { IQnType, IStreamType, Platform, PlaybackResult } from "@/types";
 import {
   apiGetBilibiliRealRid,
   apiGetBilibiliStream,
   apiGetDouyuRealRid,
-  apiGetDouyuStream,
+  apiGetDouyuPlayback,
   apiGetHuyaStream,
 } from "@/apis";
-import { detectPlatform, getLastField, isRid, parseUrlParams } from "@/lib/utils";
+import { getLastField, isRid, parseUrlParams } from "@/lib/utils";
+import { parseRoomAddress } from "@/lib/room-identity";
+import { assertPlatformEnabled } from "@/lib/platform-support";
 
 export async function resolveStreamUrl(
   url: string,
   qnName: IQnType,
-  streamType: IStreamType
-): Promise<{ stream: string; rid: string; platform: Platform }> {
-  const platform = detectPlatform(url);
+  streamType: IStreamType,
+  rate?: number,
+  signal?: AbortSignal,
+  resolvedRid?: string
+): Promise<PlaybackResult & { rid: string; platform: Platform }> {
+  const address = parseRoomAddress(url);
+  const platform = address.platform;
+  assertPlatformEnabled(platform);
+  if (platform === "direct") return { stream: address.url, rid: "", platform };
 
-  if (url.length > 150) {
-    return { stream: url, rid: "", platform: "direct" };
-  }
-
-  let rid = getLastField(url);
+  let rid = resolvedRid || address.rid || getLastField(url);
   if (!isRid(rid)) {
     const queryObj = parseUrlParams(url);
     if (queryObj.rid) rid = queryObj.rid;
@@ -28,15 +32,15 @@ export async function resolveStreamUrl(
   let stream = "";
 
   if (platform === "douyu") {
-    const realRid = await apiGetDouyuRealRid(rid);
+    const realRid = resolvedRid || await apiGetDouyuRealRid(rid, signal);
     rid = String(realRid);
-    stream = await apiGetDouyuStream(rid, qnName, streamType);
+    return { ...await apiGetDouyuPlayback(rid, qnName, streamType, rate, signal), rid, platform };
   } else if (platform === "bilibili") {
-    const realRid = await apiGetBilibiliRealRid(rid);
+    const realRid = resolvedRid || await apiGetBilibiliRealRid(rid, signal);
     rid = String(realRid);
-    stream = await apiGetBilibiliStream(rid, qnName, streamType);
+    stream = await apiGetBilibiliStream(rid, qnName, streamType, signal);
   } else if (platform === "huya") {
-    stream = await apiGetHuyaStream(rid);
+    stream = await apiGetHuyaStream(rid, signal, streamType);
   } else {
     stream = url;
   }

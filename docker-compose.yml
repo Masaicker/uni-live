@@ -1,7 +1,7 @@
 services:
   uni-live:
     build: .
-    container_name: douyuex-live
+    container_name: duokan-live
     restart: unless-stopped
     ports:
       - "7002:7002"

@@ -76,6 +76,17 @@ export class DanmakuEngine {
     this.options.speed = Math.max(40, Math.min(400, speed));
   }
 
+  setFontSize(fontSize: number) {
+    const next = Math.max(10, Math.min(40, fontSize));
+    if (this.options.fontSize === next) return;
+    this.options.fontSize = next;
+    // Old lane spacing no longer fits after a font change; new messages use fresh lanes.
+    this.active.forEach(({ el }) => el.remove());
+    this.active = [];
+    this.laneReleaseAt = [];
+    this.recalcLanes();
+  }
+
   push(text: string, opts: DanmakuPushOptions = {}) {
     if (this.destroyed || !text.trim()) return;
 

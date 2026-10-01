@@ -1,4 +1,4 @@
-# DouyuEx联播 - Docker 生产镜像（内置 Node 20，不依赖宿主机 Node 版本）
+# 多看 - Docker 生产镜像（内置 Node 20，不依赖宿主机 Node 版本）
 
 FROM node:20-alpine AS base
 
@@ -27,6 +27,7 @@ RUN addgroup --system --gid 1001 nodejs \
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 
 USER nextjs
 
