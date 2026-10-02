@@ -82,6 +82,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const audible = !video.muted && video.volume > 0 && !video.paused && video.status === "playing";
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
   const mediaOptions = timelineOptions(video.stream, video.platform);
+  const compact = props.thumbnail && !fullscreen;
 
   useEffect(() => {
     const update = () => {
@@ -214,7 +215,19 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
     finishSeek: (commit) => playbackControls.current?.finishSeek(commit),
   }), []);
 
-  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${fullscreenIdle ? "is-fullscreen-idle" : ""}`}
+  const secondaryControls = <>
+    <IconButton label="刷新直播" disabled={video.isRefreshing} onClick={props.onRefresh}><ArrowsClockwise size={17} className={video.isRefreshing ? "animate-spin" : ""} /></IconButton>
+    <IconButton label={comments.status === "unsupported" ? "不支持弹幕" : video.danmakuEnabled ? "关闭弹幕" : "开启弹幕"}
+      active={video.danmakuEnabled && comments.status !== "unsupported"} disabled={comments.status === "unsupported"} onClick={props.onDanmaku}>
+      <ChatCircleText size={17} className={comments.status === "error" || comments.status === "connecting" ? "text-warning" : ""} />
+    </IconButton>
+    <FollowButton followed={video.followed} onChange={props.onFollow} />
+    <IconButton label={props.focused ? "退出聚焦" : "聚焦房间"} active={props.focused} onClick={() => void toggleFocus()}>
+      {props.focused ? <CornersIn size={17} /> : <CornersOut size={17} />}
+    </IconButton>
+  </>;
+
+  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${compact ? "is-compact-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${fullscreenIdle ? "is-fullscreen-idle" : ""}`}
     aria-label={roomLabel(video)} data-room-id={video.id} data-platform={video.platform} data-muted={video.muted} data-audible={audible} data-focused={props.focused} data-playback-key={video.playbackKey} data-danmaku-status={comments.status}
     onPointerDownCapture={intercept} onClickCapture={intercept}
     onPointerDown={(event) => { if (event.pointerType === "touch") setTouchActive(true); }}
@@ -232,15 +245,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
         <span>{roomLabel(video)}</span><small>{video.anchorName ? video.title : ""}</small>
       </div>
       <div className="tile-controls">
-        <IconButton label="刷新直播" disabled={video.isRefreshing} onClick={props.onRefresh}><ArrowsClockwise size={17} className={video.isRefreshing ? "animate-spin" : ""} /></IconButton>
-        <IconButton label={comments.status === "unsupported" ? "不支持弹幕" : video.danmakuEnabled ? "关闭弹幕" : "开启弹幕"}
-          active={video.danmakuEnabled && comments.status !== "unsupported"} disabled={comments.status === "unsupported"} onClick={props.onDanmaku}>
-          <ChatCircleText size={17} className={comments.status === "error" || comments.status === "connecting" ? "text-warning" : ""} />
-        </IconButton>
-        <FollowButton followed={video.followed} onChange={props.onFollow} />
-        <IconButton label={props.focused ? "退出聚焦" : "聚焦房间"} active={props.focused} onClick={() => void toggleFocus()}>
-          {props.focused ? <CornersIn size={17} /> : <CornersOut size={17} />}
-        </IconButton>
+        {!compact && secondaryControls}
         <IconButton label="更多操作" active={Boolean(menu)} onClick={toggleMenu}><DotsThree size={17} /></IconButton>
         <IconButton label="关闭画面" onClick={props.onClose}><X size={17} /></IconButton>
       </div>
@@ -274,6 +279,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       style={{ left: menu.left, top: menu.top, maxHeight: Math.max(160, window.innerHeight - menu.top - 12) }}
       onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setMenu(null); root.current?.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.focus(); } }}>
       <div className="tile-menu-heading">{roomLabel(video)} · 画质与播放</div>
+      {compact && <div className="tile-menu-actions">{secondaryControls}</div>}
       {video.platform === "douyu" && video.qualities.length > 0 ? <label>画质
         <select aria-label="斗鱼画质" value={video.preferredRate ?? "auto"} disabled={video.isRefreshing} onChange={(e) => props.onQuality(e.target.value === "auto" ? undefined : Number(e.target.value), "原画")}>
           <option value="auto">{video.qnName === "原画" ? "最高可用" : `自动 · ${video.qnName}`}</option>

@@ -60,8 +60,12 @@ export function useRoomKeyboard(options: Options) {
     };
     const allowed = (event: KeyboardEvent) => {
       const node = event.target instanceof Element ? event.target : null;
+      const fullscreen = document.fullscreenElement;
+      // Fullscreen entry can move focus to body instead of the canvas.
+      const fullscreenRoom = fullscreen?.matches(".workspace-canvas .monitor-tile[data-room-id]")
+        && fullscreen.getAttribute("data-room-id") === latest.current.fullscreenId;
       return !latest.current.blocked && !document.hidden && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
-        && node?.closest(".workspace-canvas") && !node.closest(excluded)
+        && (fullscreenRoom || node?.closest(".workspace-canvas")) && !node?.closest(excluded)
         && !document.querySelector("[role='dialog'], [role='menu'], [data-sorting='true']");
     };
     const down = (event: KeyboardEvent) => {

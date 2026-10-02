@@ -23,7 +23,8 @@
   .room-sidebar { display: flex; flex-direction: column; width: 264px; height: 100%; background: #191b1e; border-right: 1px solid #2b2e34; }
   .sidebar-rail { display: flex; align-items: center; flex-direction: column; gap: 8px; width: 52px; height: 100%; padding: 14px 5px; border-right: 1px solid #2b2e34; background: #191b1e; }
   .sidebar-rail > .icon-button, .sidebar-rail > .rail-live-count { flex-shrink: 0; }
-  .rail-live-avatars { flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; padding: 6px 2px; display: flex; flex-direction: column; gap: 10px; }
+  .rail-live-avatars { flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; padding: 6px 2px; display: flex; flex-direction: column; gap: 10px; }
+  .rail-live-avatars::-webkit-scrollbar { display: none; }
   .rail-live-avatars .room-avatar-item .platform-avatar { width: 24px; height: 24px; }
   .rail-live-avatars .avatar-layout-badge { width: 9px; height: 9px; right: -2px; bottom: -2px; }
   .rail-live-count { display: flex; align-items: center; gap: 5px; margin-top: 8px; color: #b5bac3; font-size: 12px; }
@@ -217,6 +218,8 @@
   .quality-warning { display: flex; align-items: center; gap: 4px; color: #d5b479; white-space: nowrap; }
   .tile-menu { position: absolute; right: 8px; top: 38px; z-index: 10; width: 244px; max-width: calc(100% - 16px); max-height: calc(100% - 42px); overflow: auto; padding: 8px; background: #22252af5; border: 1px solid #434a54; border-radius: 8px; box-shadow: 0 12px 32px #0009; backdrop-filter: blur(12px); }
   .tile-menu-heading { padding: 4px 6px 10px; color: #7c848f; font-size: 10px; }
+  .tile-menu-actions { display: flex; align-items: center; gap: 6px; padding: 0 6px 8px; }
+  .tile-menu-actions .icon-button { width: 38px; height: 34px; border: 1px solid #34383f; background: #191b1e; }
   .tile-menu label { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px; color: #b5bac3; font-size: 11px; }
   .tile-menu select { max-width: 160px; height: 28px; background: #191b1e; border: 1px solid #34383f; border-radius: 4px; color: #e8eaed; font-size: 11px; }
   .tile-menu input { width: 140px; accent-color: #8aabf5; }
@@ -306,6 +309,13 @@
   .tile-placeholder button { font-size: 10px; padding: 2px 5px; min-height: 22px; }
   .tile-menu { top: 58px; max-height: calc(100% - 62px); }
 }
+.monitor-tile.is-thumbnail:not(:fullscreen) .tile-header { flex-wrap: nowrap; }
+.monitor-tile.is-thumbnail:not(:fullscreen) .tile-identity { min-width: 0; }
+.monitor-tile.is-thumbnail:not(:fullscreen) .tile-controls { position: static; border: 0; background: transparent; }
+.monitor-tile.is-compact-thumbnail:not(:fullscreen) .tile-header { gap: 3px; padding: 0 3px; }
+.monitor-tile.is-compact-thumbnail:not(:fullscreen) .drag-mark { display: none; }
+.monitor-tile.is-compact-thumbnail:not(:fullscreen) .tile-controls .icon-button { width: 22px; height: 22px; }
+
 @media (max-width: 767px) {
   .sidebar-container { position: fixed; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .18s; z-index: 50; }
   .sidebar-container.drawer-open { transform: translateX(0); }
