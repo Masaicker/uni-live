@@ -181,7 +181,8 @@ test("legacy grid/free/hidden/danmaku migration preserves local data and dedupli
   const result = restoreWorkspace(storage(values), {});
   assert.equal(result.rooms.length, 3); assert.deepEqual(result.openIds, ["a"]);
   assert.equal(result.rooms[0].layout.w, 100); assert.equal(result.rooms[0].layout.h, 50);
-  assert.equal(result.manual, true); assert.ok(result.rooms.every((r) => r.danmakuEnabled));
+  assert.equal(result.manual, true);
+  assert.deepEqual(result.rooms.map((r) => r.danmakuEnabled), [true, false, true]);
 });
 
 test("malformed saved rooms are isolated; shares omit credentials, follow-only rooms and runtime sound", () => {

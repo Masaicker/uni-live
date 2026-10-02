@@ -26,41 +26,54 @@ export type MonitorAction =
   | { type: "restore-closed"; rooms: FollowedRoom[]; manual: boolean }
   | { type: "room"; id: string; patch: Partial<FollowedRoom> }
   | { type: "video"; id: string; patch: Partial<MonitorVideo> }
+  | { type: "playing"; id: string; key: number; at: number }
+  | { type: "danmaku"; id: string; enabled: boolean }
   | { type: "layout"; id: string; layout: VideoLayout }
   | { type: "raise"; id: string }
   | { type: "arrange"; layouts: Record<string, VideoLayout> }
   | { type: "audio"; id: string; muted: boolean; volume: number }
   | { type: "mute-all" }
-  | { type: "focus"; id: string | null; autoAudio?: boolean }
-  | { type: "fullscreen"; id: string; active: boolean; autoAudio: boolean }
-  | { type: "audio-policy"; enabled: boolean };
+  | { type: "focus"; id: string | null; autoAudio?: boolean; autoDanmaku?: boolean }
+  | { type: "fullscreen"; id: string; active: boolean; autoAudio: boolean; autoDanmaku?: boolean }
+  | { type: "audio-policy"; enabled: boolean }
+  | { type: "danmaku-policy"; enabled: boolean };
 
-function restoreTemporaryAudio(state: MonitorState, kind: "focus" | "fullscreen"): MonitorVideo[] {
+function restoreViewingState(state: MonitorState, kind: "focus" | "fullscreen"): MonitorVideo[] {
   const session = state[kind];
   return state.videos.map((video) => {
-    if (!session || video.id !== session.id || session.adjusted) return video;
-    return { ...video, muted: session.muted, volume: session.volume };
+    if (!session || video.id !== session.id) return video;
+    return { ...video, ...(!session.adjusted ? { muted: session.muted, volume: session.volume } : {}),
+      ...(!session.danmakuAdjusted ? { danmakuEnabled: session.danmakuEnabled } : {}) };
   });
 }
 
-function enterViewingMode(state: MonitorState, kind: "focus" | "fullscreen", id: string, autoAudio: boolean): MonitorState {
+function enterViewingMode(state: MonitorState, kind: "focus" | "fullscreen", id: string, autoAudio: boolean, autoDanmaku: boolean): MonitorState {
   const previous = state.focus ?? state.fullscreen;
   const sameRoom = previous?.id === id;
-  const videos = sameRoom ? state.videos : restoreTemporaryAudio(state, state.focus ? "focus" : "fullscreen");
+  const videos = sameRoom ? state.videos : restoreViewingState(state, state.focus ? "focus" : "fullscreen");
   const target = videos.find((video) => video.id === id);
   if (!target) return state;
   // Switching modes extends the same temporary audio session, including manual changes.
-  const session = sameRoom ? { ...previous!, autoAudio } : { id, muted: target.muted, volume: target.volume, adjusted: false, autoAudio };
+  const session = sameRoom ? { ...previous!, autoAudio, autoDanmaku } : { id, muted: target.muted, volume: target.volume, adjusted: false, autoAudio,
+    danmakuEnabled: target.danmakuEnabled, danmakuAdjusted: false, autoDanmaku };
   return { ...state, focus: kind === "focus" ? session : null, fullscreen: kind === "fullscreen" ? session : null,
     videos: videos.map((video) => video.id === id ? { ...video, paused: false,
       ...(!session.adjusted ? { muted: autoAudio ? false : session.muted, volume: autoAudio ? video.volume || video.lastVolume || 0.5 : session.volume } : {}),
+      ...(!session.danmakuAdjusted ? { danmakuEnabled: autoDanmaku || session.danmakuEnabled } : {}),
     } : video) };
 }
 
+function changes<T extends object>(target: T, patch: Partial<T>): boolean {
+  return Object.keys(patch).some((key) => !Object.is(target[key as keyof T], patch[key as keyof T]));
+}
+
 function updateRoom(state: MonitorState, id: string, patch: Partial<FollowedRoom>): MonitorState {
+  const roomsChanged = state.rooms.some((room) => room.id === id && changes(room, patch));
+  const videosChanged = state.videos.some((video) => video.id === id && changes(video, patch));
+  if (!roomsChanged && !videosChanged) return state;
   return { ...state,
-    rooms: state.rooms.map((room) => room.id === id ? { ...room, ...patch } : room),
-    videos: state.videos.map((video) => video.id === id ? { ...video, ...patch, layout: patch.layout ?? video.layout } : video),
+    rooms: roomsChanged ? state.rooms.map((room) => room.id === id ? { ...room, ...patch } : room) : state.rooms,
+    videos: videosChanged ? state.videos.map((video) => video.id === id ? { ...video, ...patch, layout: patch.layout ?? video.layout } : video) : state.videos,
   };
 }
 
@@ -129,7 +142,22 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
       return { ...state, rooms, videos, manual: action.manual };
     }
     case "room": return updateRoom(state, action.id, action.patch);
-    case "video": return { ...state, videos: state.videos.map((v) => v.id === action.id ? { ...v, ...action.patch } : v) };
+    case "video": return state.videos.some((v) => v.id === action.id && changes(v, action.patch))
+      ? { ...state, videos: state.videos.map((v) => v.id === action.id ? { ...v, ...action.patch } : v) } : state;
+    case "playing": {
+      const video = state.videos.find((v) => v.id === action.id);
+      if (!video || video.playbackKey !== action.key) return state;
+      let next = monitorReducer(state, { type: "video", id: action.id, patch: { paused: false, status: "playing", errorMessage: undefined, lastPlayedKey: action.key } });
+      if (video.lastPlayedKey !== action.key) next = monitorReducer(next, { type: "played", id: action.id, at: action.at });
+      return next;
+    }
+    case "danmaku": {
+      const next = updateRoom(state, action.id, { danmakuEnabled: action.enabled, danmakuPreferenceSet: true });
+      return { ...next,
+        focus: next.focus?.id === action.id ? { ...next.focus, danmakuAdjusted: true } : next.focus,
+        fullscreen: next.fullscreen?.id === action.id ? { ...next.fullscreen, danmakuAdjusted: true } : next.fullscreen,
+      };
+    }
     case "layout": return { ...updateRoom(state, action.id, { layout: action.layout }), manual: true };
     case "raise": {
       if (state.focus || state.fullscreen) return state;
@@ -153,13 +181,13 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
     }
     case "mute-all": return { ...state, videos: state.videos.map((v) => ({ ...v, muted: true })), focus: state.focus ? { ...state.focus, adjusted: true } : null, fullscreen: state.fullscreen ? { ...state.fullscreen, adjusted: true } : null };
     case "focus": {
-      if (!action.id || action.id === state.focus?.id) return { ...state, videos: restoreTemporaryAudio(state, "focus"), focus: null };
-      return enterViewingMode(state, "focus", action.id, action.autoAudio !== false);
+      if (!action.id || action.id === state.focus?.id) return state.focus ? { ...state, videos: restoreViewingState(state, "focus"), focus: null } : state;
+      return enterViewingMode(state, "focus", action.id, action.autoAudio !== false, action.autoDanmaku !== false);
     }
     case "fullscreen": {
-      if (!action.active) return state.fullscreen?.id === action.id ? { ...state, videos: restoreTemporaryAudio(state, "fullscreen"), fullscreen: null } : state;
+      if (!action.active) return state.fullscreen?.id === action.id ? { ...state, videos: restoreViewingState(state, "fullscreen"), fullscreen: null } : state;
       if (state.fullscreen?.id === action.id) return state;
-      return enterViewingMode(state, "fullscreen", action.id, action.autoAudio);
+      return enterViewingMode(state, "fullscreen", action.id, action.autoAudio, action.autoDanmaku !== false);
     }
     case "audio-policy": {
       const focus = state.focus ? { ...state.focus, autoAudio: action.enabled } : null;
@@ -170,6 +198,13 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
         if (!baseline || sessions.some((session) => session?.adjusted)) return video;
         return { ...video, muted: action.enabled ? false : baseline.muted, volume: action.enabled ? baseline.volume || video.lastVolume || 0.5 : baseline.volume, ...(action.enabled ? { paused: false } : {}) };
       }) };
+    }
+    case "danmaku-policy": {
+      const focus = state.focus ? { ...state.focus, autoDanmaku: action.enabled } : null;
+      const fullscreen = state.fullscreen ? { ...state.fullscreen, autoDanmaku: action.enabled } : null;
+      const session = focus ?? fullscreen;
+      return { ...state, focus, fullscreen, videos: state.videos.map((video) => !session || session.id !== video.id || session.danmakuAdjusted
+        ? video : { ...video, danmakuEnabled: action.enabled || session.danmakuEnabled }) };
     }
   }
 }

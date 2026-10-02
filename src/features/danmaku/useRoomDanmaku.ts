@@ -30,7 +30,8 @@ export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean
       if (disposed) return;
       setStatus("connecting");
       let finished = false;
-      const ready = () => { if (!disposed && !finished) { clearTimeout(connectTimer); setStatus("connected"); } };
+      let connected = false;
+      const ready = () => { if (!disposed && !finished && !connected) { connected = true; clearTimeout(connectTimer); setStatus("connected"); } };
       const fail = () => {
         if (disposed || finished) return;
         finished = true;

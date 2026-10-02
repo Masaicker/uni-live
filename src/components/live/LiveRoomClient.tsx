@@ -5,6 +5,8 @@ import { SquaresFour, SidebarSimple, Plus } from "@phosphor-icons/react";
 import type { FollowedRoom, IQnType, MonitorVideo, PlaybackResult, RoomInfo } from "@/types";
 import { apiGetRoomInfo } from "@/apis";
 import { RoomSidebar } from "./RoomSidebar";
+import { useRoomKeyboard } from "./useRoomKeyboard";
+import { useRoomHover } from "./useRoomHover";
 import { SettingsPanel, DEFAULT_DANMAKU_PREFERENCES, type DanmakuPreferences } from "./SettingsPanel";
 import { MonitorCanvas } from "@/features/monitor/MonitorCanvas";
 import { autoLayouts, arrangeByPosition, insertionLayout, type CanvasSize } from "@/features/monitor/geometry";
@@ -27,13 +29,16 @@ export function LiveRoomClient(share: LegacyShare) {
   current.current = state;
   // Async operations and consecutive UI actions must observe the same reducer state.
   const send = useCallback((action: MonitorAction) => {
-    current.current = monitorReducer(current.current, action);
+    const next = monitorReducer(current.current, action);
+    if (next === current.current) return;
+    current.current = next;
     reactDispatch(action);
   }, []);
   const [ready, setReady] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [libraryView, setLibraryView] = useState<"list" | "avatars">("list");
   const [autoFocusAudio, setAutoFocusAudio] = useState(true);
+  const [autoFocusDanmaku, setAutoFocusDanmaku] = useState(true);
   const [recovery, setRecovery] = useState<RecoveryPreferences>(DEFAULT_RECOVERY_PREFERENCES);
   const recoveryPreferences = useRef(recovery);
   recoveryPreferences.current = recovery;
@@ -59,6 +64,9 @@ export function LiveRoomClient(share: LegacyShare) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const initialShare = useRef(share);
   const streamType = useRef<ReturnType<typeof detectStreamType>>("flv");
+  const workspace = useRef<HTMLDivElement>(null);
+  const hoveredId = useRoomHover(workspace, `${libraryView}:${collapsed}:${drawer}:${settings}`);
+  const controlRef = useRoomKeyboard({ videos: state.videos, focusedId: state.focus?.id ?? null, fullscreenId: state.fullscreen?.id ?? null, blocked: settings });
 
   const dismissUndo = useCallback(() => { clearTimeout(undoTimer.current); setClosedRooms(null); setUnfollowedRoom(null); }, []);
 
@@ -77,6 +85,7 @@ export function LiveRoomClient(share: LegacyShare) {
         setCollapsed(saved.collapsed === true);
         setLibraryView(saved.libraryView === "avatars" ? "avatars" : "list");
         setAutoFocusAudio(saved.autoFocusAudio !== false);
+        setAutoFocusDanmaku(saved.autoFocusDanmaku !== false);
         setRecovery(normalizeRecoveryPreferences(saved.recovery));
         if (qualities.includes(saved.quality)) setQuality(saved.quality);
       }
@@ -111,15 +120,15 @@ export function LiveRoomClient(share: LegacyShare) {
 
   useEffect(() => {
     if (!ready) return;
-    try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaceSnapshot(state))); }
+    try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaceSnapshot(current.current))); }
     catch { notify("浏览器存储空间不足，本次修改未能保存"); }
-  }, [state, ready, notify]); // Runtime streams are excluded by workspaceSnapshot.
+  }, [state.rooms, state.manual, videoIds, ready, notify]); // Runtime-only changes need no storage write.
 
   useEffect(() => {
     if (!ready) return;
-    try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ collapsed, quality, danmaku, libraryView, autoFocusAudio, recovery })); }
+    try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ collapsed, quality, danmaku, libraryView, autoFocusAudio, autoFocusDanmaku, recovery })); }
     catch { notify("观看偏好未能保存"); }
-  }, [collapsed, quality, danmaku, libraryView, autoFocusAudio, recovery, ready, notify]);
+  }, [collapsed, quality, danmaku, libraryView, autoFocusAudio, autoFocusDanmaku, recovery, ready, notify]);
 
   const stopWatching = useCallback((id: string, remove = false) => {
     recoveryRequests.current.get(id)?.abort();
@@ -415,6 +424,7 @@ export function LiveRoomClient(share: LegacyShare) {
     notify(copied ? "当前观看的分享链接已复制" : "复制失败，请检查浏览器剪贴板权限");
   };
   const changeAutoFocusAudio = (enabled: boolean) => { setAutoFocusAudio(enabled); send({ type: "audio-policy", enabled }); };
+  const changeAutoFocusDanmaku = (enabled: boolean) => { setAutoFocusDanmaku(enabled); send({ type: "danmaku-policy", enabled }); };
   const changeRecovery = (value: RecoveryPreferences) => {
     setRecovery(normalizeRecoveryPreferences(value));
     for (const [id, controller] of recoveryRequests.current) { controller.abort(); send({ type: "video", id, patch: { isRefreshing: false } }); }
@@ -440,7 +450,7 @@ export function LiveRoomClient(share: LegacyShare) {
     }
   };
   const sidebarProps = {
-    rooms: state.rooms.filter((room) => isPlatformEnabled(room.platform)), videos: state.videos, collapsed: mobile ? false : collapsed, adding, focused: Boolean(state.focus), view: libraryView, onViewChange: setLibraryView,
+    rooms: state.rooms.filter((room) => isPlatformEnabled(room.platform)), videos: state.videos, hoveredId, collapsed: mobile ? false : collapsed, adding, focused: Boolean(state.focus), view: libraryView, onViewChange: setLibraryView,
     onCollapse: (value: boolean) => mobile ? setDrawer(!value) : setCollapsed(value), onAdd: addRoom, onOpen: openRoom,
     onClose: stopWatching, onCloseAll: () => void closeAll(), onFollow: changeFollow,
     onForget: (id: string) => { dismissUndo(); send({ type: "forget", id }); }, onClearHistory: () => { dismissUndo(); send({ type: "clear-history" }); },
@@ -450,7 +460,7 @@ export function LiveRoomClient(share: LegacyShare) {
     refreshingAll, onRefreshAll: () => void refreshAll(),
   };
 
-  return <div className="live-workspace">
+  return <div ref={workspace} className="live-workspace">
     <div className={`sidebar-container ${drawer ? "drawer-open" : ""}`}><RoomSidebar {...sidebarProps} /></div>
     {mobile && drawer && <button className="sidebar-scrim" aria-label="关闭房间列表" onClick={() => setDrawer(false)} />}
     {mobile && !drawer && <button className="mobile-sidebar-toggle" aria-label="打开房间列表" onClick={() => setDrawer(true)}><SidebarSimple size={20} /></button>}
@@ -460,22 +470,22 @@ export function LiveRoomClient(share: LegacyShare) {
         onKeyDown={(event) => {
           if (event.key.toLowerCase() === "r" && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !settings && !(event.target as HTMLElement).closest("input, textarea, select, [contenteditable], [role='dialog'], [role='menu']")) { event.preventDefault(); arrange(); }
         }}>
-        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} size={size} danmaku={danmaku}
-          onFullscreenChange={(id, active) => send({ type: "fullscreen", id, active, autoAudio: autoFocusAudio })}
-          onLayout={(id, layout) => send({ type: "layout", id, layout })} onRaise={(id) => send({ type: "raise", id })} onFocus={(id) => send({ type: "focus", id, autoAudio: autoFocusAudio })} onMute={toggleMute}
+        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} hoveredId={hoveredId} onControlRef={controlRef} size={size} danmaku={danmaku}
+          onFullscreenChange={(id, active) => send({ type: "fullscreen", id, active, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })}
+          onLayout={(id, layout) => send({ type: "layout", id, layout })} onRaise={(id) => send({ type: "raise", id })} onFocus={(id) => send({ type: "focus", id, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })} onMute={toggleMute}
           onAudio={(id, muted, volume) => send({ type: "audio", id, muted, volume })} onClose={stopWatching} onRefresh={refresh}
-          onDanmaku={(id) => { const video = current.current.videos.find((v) => v.id === id); if (video) send({ type: "room", id, patch: { danmakuEnabled: !video.danmakuEnabled } }); }}
+          onDanmaku={(id) => { const video = current.current.videos.find((v) => v.id === id); if (video) send({ type: "danmaku", id, enabled: !video.danmakuEnabled }); }}
           onFollow={changeFollow} recovery={recovery} onRecoveryEvent={(id, key, event) => void recoveryEvent(id, key, event)}
           onPlaybackError={playbackError} onPaused={(id, paused) => send({ type: "video", id, patch: { paused } })}
           onReady={(id, key) => { const video = current.current.videos.find((video) => video.id === id); if (video?.playbackKey === key && video.paused) send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); }}
-          onPlaying={(id, key) => { if (current.current.videos.find((video) => video.id === id)?.playbackKey !== key) return; send({ type: "video", id, patch: { paused: false, status: "playing", errorMessage: undefined } }); send({ type: "played", id, at: Date.now() }); }} />
+          onPlaying={(id, key) => send({ type: "playing", id, key, at: Date.now() })} />
           : <div className="workspace-empty"><div className="empty-icon"><SquaresFour size={30} weight="light" /></div>
             <span className="empty-eyebrow">YOUR LIVE DESK</span><h1>把喜欢的直播，放在一起</h1>
             <button className="primary-button" onClick={() => { if (mobile) setDrawer(true); else setCollapsed(false); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="直播间地址"]')?.focus()); }}><Plus size={17} />添加第一个房间</button>
           </div>}
       </div>
     </main>
-    <SettingsPanel open={settings} onClose={() => setSettings(false)} quality={quality} onQualityChange={setQuality} danmaku={danmaku} onDanmakuChange={setDanmaku} autoFocusAudio={autoFocusAudio} onAutoFocusAudioChange={changeAutoFocusAudio} recovery={recovery} onRecoveryChange={changeRecovery} onShare={() => void shareCurrent()} hasVideos={state.videos.length > 0} />
+    <SettingsPanel open={settings} onClose={() => setSettings(false)} quality={quality} onQualityChange={setQuality} danmaku={danmaku} onDanmakuChange={setDanmaku} autoFocusAudio={autoFocusAudio} onAutoFocusAudioChange={changeAutoFocusAudio} autoFocusDanmaku={autoFocusDanmaku} onAutoFocusDanmakuChange={changeAutoFocusDanmaku} recovery={recovery} onRecoveryChange={changeRecovery} onShare={() => void shareCurrent()} hasVideos={state.videos.length > 0} />
     {(toast || closedRooms || unfollowedRoom) && <div role="status" className="workspace-toast">{unfollowedRoom ? <><span>已取消关注 {roomLabel(unfollowedRoom)}</span><button type="button" className="toast-undo" onClick={undoUnfollow}>撤销</button></> : closedRooms ? <><span>已关闭 {closedRooms.rooms.length} 个画面</span><button type="button" className="toast-undo" onClick={undoCloseAll}>撤销</button></> : toast}</div>}
   </div>;
 }

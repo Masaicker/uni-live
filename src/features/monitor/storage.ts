@@ -23,7 +23,7 @@ function createRoomId(): string {
 
 export function createRoom(url: string, id = createRoomId()): FollowedRoom {
   const address = parseRoomAddress(url);
-  return { id, ...address, anchorName: "", title: "", liveStatus: null, followed: false, qnName: "原画", danmakuEnabled: true, volume: 0.5, lastVolume: 0.5 };
+  return { id, ...address, anchorName: "", title: "", liveStatus: null, followed: false, qnName: "原画", danmakuEnabled: false, volume: 0.5, lastVolume: 0.5 };
 }
 
 function safeJson(value: string | null): unknown {
@@ -56,7 +56,9 @@ export function normalizeSnapshot(value: unknown): WorkspaceSnapshot | null {
       room.lastStatusAt = Number.isFinite(item.lastStatusAt) ? item.lastStatusAt : undefined;
       room.qnName = qualities.includes(item.qnName) ? item.qnName : "原画";
       room.preferredRate = Number.isInteger(item.preferredRate) && item.preferredRate! >= 0 ? item.preferredRate : undefined;
-      room.danmakuEnabled = item.danmakuEnabled !== false;
+      // Old snapshots enabled every room by default and did not identify manual choices.
+      room.danmakuPreferenceSet = item.danmakuPreferenceSet === true;
+      room.danmakuEnabled = room.danmakuPreferenceSet && item.danmakuEnabled === true;
       room.volume = Number.isFinite(item.volume) ? Math.max(0, Math.min(1, item.volume)) : 0.5;
       room.lastVolume = Number.isFinite(item.lastVolume) && item.lastVolume > 0 ? Math.min(1, item.lastVolume) : 0.5;
       room.layout = validLayout(item.layout) ? { ...item.layout, visible: true } : undefined;
@@ -84,7 +86,10 @@ export function restoreWorkspace(storage: Pick<Storage, "getItem">, share: Legac
     try {
       const room = createRoom(item.url, typeof item.id === "string" ? item.id : undefined);
       room.qnName = qualities.includes(item.qnName) ? item.qnName : "原画";
-      if (typeof item.danmakuEnabled === "boolean") room.danmakuEnabled = item.danmakuEnabled;
+      if (typeof item.danmakuEnabled === "boolean") {
+        room.danmakuEnabled = item.danmakuEnabled;
+        room.danmakuPreferenceSet = true;
+      }
       if (Number.isInteger(item.preferredRate) && item.preferredRate >= 0) room.preferredRate = item.preferredRate;
       room.layout = validLayout(item.layout) ? { ...item.layout, visible: true } : undefined;
       if (!share.shareVideo) room.lastWatchedAt = Date.now() - rooms.length;
@@ -105,7 +110,10 @@ export function restoreWorkspace(storage: Pick<Storage, "getItem">, share: Legac
     try {
       const room = createRoom(item.url);
       if (!share.shareVideo) room.lastWatchedAt = Date.now() - rooms.length;
-      if (!rooms.some((r) => roomIdentity(r) === roomIdentity(room))) rooms.push(room);
+      const existing = rooms.find((r) => roomIdentity(r) === roomIdentity(room));
+      if (existing) {
+        if (!existing.danmakuPreferenceSet) { existing.danmakuEnabled = true; existing.danmakuPreferenceSet = true; }
+      } else rooms.push({ ...room, danmakuEnabled: true, danmakuPreferenceSet: true });
     } catch { /* Invalid legacy source. */ }
   }
   if (share.shareVideo) {
@@ -116,7 +124,7 @@ export function restoreWorkspace(storage: Pick<Storage, "getItem">, share: Legac
         const existing = local.rooms.find((room) => roomIdentity(room) === roomIdentity(imported));
         if (existing) {
           const openIndex = openIds.indexOf(imported.id);
-          rooms[i] = { ...existing, ...imported, id: existing.id, followed: existing.followed, lastWatchedAt: existing.lastWatchedAt, anchorName: existing.anchorName, title: existing.title, avatarUrl: existing.avatarUrl, volume: existing.volume, lastVolume: existing.lastVolume };
+          rooms[i] = { ...existing, ...imported, id: existing.id, followed: existing.followed, lastWatchedAt: existing.lastWatchedAt, anchorName: existing.anchorName, title: existing.title, avatarUrl: existing.avatarUrl, volume: existing.volume, lastVolume: existing.lastVolume, ...(existing.danmakuPreferenceSet ? { danmakuEnabled: existing.danmakuEnabled, danmakuPreferenceSet: true } : {}) };
           if (openIndex >= 0) openIds[openIndex] = existing.id;
         } else if (local.rooms.some((room) => room.id === imported.id)) {
           const openIndex = openIds.indexOf(imported.id);

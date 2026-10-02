@@ -2,11 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useRef } from "react";
-import { readMediaTimeline, type MediaTimeline } from "./media-timeline";
+import { isFlvSource, readMediaTimeline, type MediaTimeline, type TimelineOptions } from "./media-timeline";
 
 const ReactPlayer = dynamic(() => import("react-player"), { ssr: false });
+const FlvPlayer = dynamic(() => import("./FlvPlayer"), { ssr: false });
 
-interface PlayerAdapterProps {
+export interface PlayerAdapterProps {
   src: string;
   playbackKey: number;
   muted?: boolean;
@@ -19,11 +20,14 @@ interface PlayerAdapterProps {
   onReady?: () => void;
   onPause?: () => void;
   onDimensions?: (width: number, height: number) => void;
+  onReplayExpired?: () => void;
   onTimeline?: (timeline: MediaTimeline) => void;
+  timelineOptions?: TimelineOptions;
 }
 
-export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, paused = false, mediaRef, onError, onAudioChange, onPlay, onReady, onPause, onDimensions, onTimeline }: PlayerAdapterProps) {
+export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, paused = false, mediaRef, onError, onAudioChange, onPlay, onReady, onPause, onDimensions, onReplayExpired, onTimeline, timelineOptions }: PlayerAdapterProps) {
   const started = useRef<number | null>(null);
+  const hls = useRef<{ src: string; key: number; engine: { levels?: { details?: { live: boolean } }[] } | null } | null>(null);
   const desiredAudio = useRef({ muted, volume });
   desiredAudio.current = { muted, volume };
   const handleError = useCallback((event: unknown) => {
@@ -33,14 +37,20 @@ export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, pa
   const reportMedia = (event: React.SyntheticEvent<HTMLVideoElement>) => {
     const video = event.currentTarget;
     if (mediaRef) mediaRef.current = video;
-    onTimeline?.(readMediaTimeline(video));
+    if (!onTimeline) return;
+    const manifestLive = hls.current?.src === src && hls.current.key === playbackKey ? hls.current.engine?.levels?.find((level) => level.details)?.details?.live : undefined;
+    onTimeline?.(readMediaTimeline(video, { ...timelineOptions, live: timelineOptions?.live ?? manifestLive }));
   };
 
   if (!src) return null;
+  if (isFlvSource(src)) return <div className="player-adapter absolute inset-0"><FlvPlayer key={`${src}:${playbackKey}`} src={src} playbackKey={playbackKey}
+    muted={muted} volume={volume} paused={paused} mediaRef={mediaRef} onError={onError} onAudioChange={onAudioChange}
+    onPlay={onPlay} onReady={onReady} onPause={onPause} onDimensions={onDimensions} onReplayExpired={onReplayExpired} onTimeline={onTimeline} timelineOptions={timelineOptions} /></div>;
   return <div className="player-adapter absolute inset-0">
     <ReactPlayer key={playbackKey} url={src} playing={!paused} muted={muted} volume={volume} controls={false}
       width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0 }}
       onError={handleError}
+      onReady={(player) => { hls.current = { src, key: playbackKey, engine: player.getInternalPlayer("hls") }; }}
       onPlay={() => { started.current = playbackKey; onPlay?.(); }}
       onPause={() => { if (started.current === playbackKey) onPause?.(); }}
       config={{ file: {
@@ -60,10 +70,11 @@ export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, pa
             onDimensions?.(event.currentTarget.videoWidth, event.currentTarget.videoHeight); reportMedia(event);
             onReady?.();
           },
-          onTimeUpdate: reportMedia, onProgress: reportMedia, onDurationChange: reportMedia,
+          onTimeUpdate: onTimeline ? reportMedia : undefined, onProgress: onTimeline ? reportMedia : undefined,
+          onDurationChange: onTimeline ? reportMedia : undefined, onSeeked: onTimeline ? reportMedia : undefined,
         },
-        forceHLS: src.includes(".m3u8"),
-        forceFLV: src.includes(".flv") || (!/\.(m3u8|mp4|webm|ogg)(?:[?#]|$)/i.test(src)),
+        forceHLS: /\.m3u8(?:[?#]|$)/i.test(src),
+        hlsOptions: { backBufferLength: 180 },
       } }} />
   </div>;
 }

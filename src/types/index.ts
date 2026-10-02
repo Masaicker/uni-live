@@ -39,6 +39,7 @@ export interface FollowedRoom extends RoomInfo {
   qnName: IQnType;
   preferredRate?: number;
   danmakuEnabled: boolean;
+  danmakuPreferenceSet?: boolean;
   volume: number;
   lastVolume: number;
   layout?: VideoLayout;
@@ -61,6 +62,7 @@ export interface MonitorVideo extends FollowedRoom {
   isRefreshing: boolean;
   recoveryKey: number;
   recoveryStopped?: boolean;
+  lastPlayedKey?: number;
 }
 
 export interface FocusSession {
@@ -69,6 +71,9 @@ export interface FocusSession {
   volume: number;
   adjusted: boolean;
   autoAudio: boolean;
+  danmakuEnabled: boolean;
+  danmakuAdjusted: boolean;
+  autoDanmaku: boolean;
 }
 
 export interface MonitorState {

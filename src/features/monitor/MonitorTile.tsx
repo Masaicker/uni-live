@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChatCircleText, CornersOut, CornersIn, X, DotsThree, ArrowsClockwise, Copy, ArrowSquareOut, WarningCircle, DotsSixVertical } from "@phosphor-icons/react";
 import type { IQnType, MonitorVideo } from "@/types";
@@ -13,8 +13,8 @@ import type { DanmakuPreferences } from "@/components/live/SettingsPanel";
 import { qualities } from "./storage";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { copyText } from "@/lib/utils";
-import { PlaybackControls } from "@/features/video/PlaybackControls";
-import { emptyTimeline, seekInMedia } from "@/features/video/media-timeline";
+import { PlaybackControls, type PlaybackControlsHandle } from "@/features/video/PlaybackControls";
+import { seekInMedia, timelineOptions } from "@/features/video/media-timeline";
 import { FollowButton } from "@/components/live/FollowButton";
 import { usePlaybackRecovery } from "@/features/video/usePlaybackRecovery";
 import type { RecoveryEvent, RecoveryPreferences } from "@/features/video/playback-watchdog";
@@ -23,6 +23,7 @@ interface Props {
   video: MonitorVideo;
   focused: boolean;
   thumbnail: boolean;
+  hovered: boolean;
   danmaku: DanmakuPreferences;
   onFullscreenChange: (active: boolean) => void;
   onDrag: (event: React.PointerEvent) => void;
@@ -46,14 +47,22 @@ interface Props {
 // Full class names must be present in source so Tailwind keeps the handle geometry.
 const handles: Record<ResizeHandle, string> = { nw: "resize-nw", ne: "resize-ne", sw: "resize-sw", se: "resize-se", n: "resize-n", s: "resize-s", w: "resize-w", e: "resize-e" };
 
-export function MonitorTile(props: Props) {
+export interface MonitorTileHandle {
+  key: (key: string) => boolean;
+  finishSeek: (commit: boolean) => void;
+}
+
+export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function MonitorTile(props, ref) {
   const { video } = props;
+  const latest = useRef(props);
+  latest.current = props;
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [dimensions, setDimensions] = useState("");
-  const [timeline, setTimeline] = useState(emptyTimeline);
+  const playbackControls = useRef<PlaybackControlsHandle>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenIdle, setFullscreenIdle] = useState(false);
+  const wakeFullscreen = useRef<() => void>(() => {});
   const [touchActive, setTouchActive] = useState(false);
   const [controlError, setControlError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -72,6 +81,7 @@ export function MonitorTile(props: Props) {
   const comments = useRoomDanmaku(video.platform, video.rid, video.danmakuEnabled, layer);
   const audible = !video.muted && video.volume > 0 && !video.paused && video.status === "playing";
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
+  const mediaOptions = timelineOptions(video.stream, video.platform);
 
   useEffect(() => {
     const update = () => {
@@ -109,6 +119,7 @@ export function MonitorTile(props: Props) {
       }, 3000);
     };
     const down = () => { pressed = true; wake(); };
+    wakeFullscreen.current = wake;
     const up = () => { pressed = false; wake(); };
     node.addEventListener("pointermove", wake);
     node.addEventListener("pointerdown", down);
@@ -118,6 +129,7 @@ export function MonitorTile(props: Props) {
     node.addEventListener("focusout", wake);
     wake();
     return () => {
+      wakeFullscreen.current = () => {};
       clearTimeout(timer);
       node.removeEventListener("pointermove", wake);
       node.removeEventListener("pointerdown", down);
@@ -179,8 +191,30 @@ export function MonitorTile(props: Props) {
     }
   };
   const showFeedback = (label: string) => { clearTimeout(feedbackTimer.current); setFeedback(label); feedbackTimer.current = setTimeout(() => setFeedback(""), 900); };
+  useImperativeHandle(ref, () => ({
+    key: (key) => {
+      const value = latest.current;
+      wakeFullscreen.current();
+      if (key === " ") {
+        value.onPaused(!value.video.paused);
+        showFeedback(value.video.paused ? "播放" : "暂停");
+      } else if (key === "ArrowUp" || key === "ArrowDown") {
+        const previous = value.video.muted ? 0 : value.video.volume;
+        const volume = Math.max(0, Math.min(100, Math.round(previous * 100) + (key === "ArrowUp" ? 5 : -5))) / 100;
+        value.onAudio(volume === 0, volume);
+        showFeedback(volume === 0 ? "已静音" : `音量 ${Math.round(volume * 100)}%`);
+      } else {
+        if (value.video.isRefreshing) return false;
+        const label = playbackControls.current?.previewSeek(key === "ArrowLeft" ? -5 : 5);
+        showFeedback(label ?? "暂无可回看的缓存");
+        return Boolean(label);
+      }
+      return true;
+    },
+    finishSeek: (commit) => playbackControls.current?.finishSeek(commit),
+  }), []);
 
-  return <section ref={root} className={`monitor-tile ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${fullscreenIdle ? "is-fullscreen-idle" : ""}`}
+  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${fullscreenIdle ? "is-fullscreen-idle" : ""}`}
     aria-label={roomLabel(video)} data-room-id={video.id} data-platform={video.platform} data-muted={video.muted} data-audible={audible} data-focused={props.focused} data-playback-key={video.playbackKey} data-danmaku-status={comments.status}
     onPointerDownCapture={intercept} onClickCapture={intercept}
     onPointerDown={(event) => { if (event.pointerType === "touch") setTouchActive(true); }}
@@ -215,13 +249,15 @@ export function MonitorTile(props: Props) {
       if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || (event.target as HTMLElement).closest("button, input, select, a, .playback-controls")) return;
       event.preventDefault(); void toggleFullscreen();
     }}>
-      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} mediaRef={media}
-        onAudioChange={props.onAudio} onError={props.onPlaybackError} onPlay={props.onPlaying} onReady={props.onReady} onPause={() => { if (video.paused) props.onPaused(true); }} onTimeline={setTimeline}
+      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} mediaRef={media} timelineOptions={mediaOptions}
+        onAudioChange={props.onAudio} onError={props.onPlaybackError} onPlay={props.onPlaying} onReady={props.onReady} onPause={() => { if (video.paused) props.onPaused(true); }}
+        onTimeline={(timeline) => playbackControls.current?.report(timeline)}
+        onReplayExpired={() => showFeedback("较早的缓存已过期，已移到最早可播位置")}
         onDimensions={(w, h) => setDimensions(w && h ? `${w} × ${h}` : "")} />}
-      {video.stream && <PlaybackControls paused={video.paused} muted={video.muted} volume={video.volume} timeline={timeline} fullscreen={fullscreen}
+      {video.stream && <PlaybackControls ref={playbackControls} key={video.playbackKey} mediaRef={media} paused={video.paused} muted={video.muted} volume={video.volume} fullscreen={fullscreen}
         info={<><span className="playback-quality" title={`${actualQuality}${dimensions ? ` · ${dimensions}` : ""}`}>{actualQuality}{dimensions && <span className="actual-resolution"> · {dimensions}</span>}</span>{video.warning && <span title={video.warning} className="quality-warning"><WarningCircle size={14} /></span>}</>}
         onTogglePaused={() => props.onPaused(!video.paused)} onMute={props.onMute} onAudio={props.onAudio}
-        onSeek={(time) => { if (media.current) seekInMedia(media.current, time); }}
+        onSeek={(time) => media.current ? seekInMedia(media.current, time, mediaOptions) : false}
         onFullscreen={() => void toggleFullscreen()} />}
       {!video.stream && <div className="tile-placeholder">
         {video.status === "error" ? <><WarningCircle size={25} /><span>{platformNames[video.platform]} · {video.rid}</span><p>{video.errorMessage || "暂时无法播放"}</p>
@@ -233,7 +269,7 @@ export function MonitorTile(props: Props) {
       {video.isRefreshing && <span className="tile-refreshing"><ArrowsClockwise size={13} className="animate-spin" />更新中</span>}
     </div>
     {controlError && <span role="status" className="tile-error-strip">{controlError}</span>}
-    {fullscreen && feedback && <span role="status" className="tile-feedback">{feedback}</span>}
+    {feedback && <span role="status" className="tile-feedback">{feedback}</span>}
     {menu && createPortal(<div ref={menuRef} className="tile-menu floating-menu" role="dialog" aria-label={`${roomLabel(video)}播放设置`}
       style={{ left: menu.left, top: menu.top, maxHeight: Math.max(160, window.innerHeight - menu.top - 12) }}
       onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setMenu(null); root.current?.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')?.focus(); } }}>
@@ -256,4 +292,4 @@ export function MonitorTile(props: Props) {
     </div>, fullscreen && root.current ? root.current : document.body)}
     {!fullscreen && !props.focused && !props.thumbnail && (Object.entries(handles) as [ResizeHandle, string][]).map(([handle, className]) => <button key={handle} className={`resize-handle ${className}`} aria-label={`调整大小 ${handle}`} title="拖动调整大小" onPointerDown={(event) => props.onResize(event, handle)} />)}
   </section>;
-}
+});

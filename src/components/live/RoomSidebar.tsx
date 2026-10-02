@@ -9,10 +9,12 @@ import { followedRooms, watchingHistory } from "@/features/monitor/library";
 import { IconButton } from "./IconButton";
 import { RoomAvatar } from "./RoomAvatar";
 import { FollowButton } from "./FollowButton";
+import { useRoomSortDrag } from "./useRoomSortDrag";
 
 interface Props {
   rooms: FollowedRoom[];
   videos: MonitorVideo[];
+  hoveredId: string | null;
   collapsed: boolean;
   adding: boolean;
   focused: boolean;
@@ -42,9 +44,7 @@ export function RoomSidebar(props: Props) {
   const [url, setUrl] = useState("");
   const [avatarMenu, setAvatarMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [editing, setEditing] = useState(false);
-  const [dropTarget, setDropTarget] = useState<{ id: string; edge: "before" | "after" } | null>(null);
-  const [dragged, setDragged] = useState<string | null>(null);
-  const draggedRef = useRef<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const followed = followedRooms(props.rooms, !editing);
@@ -53,12 +53,12 @@ export function RoomSidebar(props: Props) {
   const source = tab === "followed" ? followed : history;
   const visible = source.filter((room) => `${roomLabel(room)} ${room.title} ${room.rid} ${platformNames[room.platform]}`.toLowerCase().includes(query.toLowerCase()));
   const avatarView = !editing && props.view === "avatars";
+  const { dragged, dropTarget, begin: beginDrag, cancel: clearDrag } = useRoomSortDrag(editing && !props.collapsed && tab === "followed", listRef, visible.map((room) => room.id), props.onReorder);
   const selected = props.rooms.find((room) => room.id === avatarMenu?.id);
   const selectedVideo = props.videos.find((video) => video.id === selected?.id);
   const draggedRoom = props.rooms.find((room) => room.id === dragged);
 
-  const clearDrag = () => { draggedRef.current = null; setDragged(null); setDropTarget(null); };
-  useEffect(() => { setAvatarMenu(null); setEditing(false); draggedRef.current = null; setDragged(null); setDropTarget(null); }, [tab, props.view, props.collapsed]);
+  useEffect(() => { setAvatarMenu(null); setEditing(false); }, [tab, props.view, props.collapsed]);
   useLayoutEffect(() => {
     if (!avatarMenu || !menuRef.current) return;
     const bounds = menuRef.current.getBoundingClientRect();
@@ -98,33 +98,6 @@ export function RoomSidebar(props: Props) {
     const next = visible[index + (["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1)];
     if (next) props.onReorder(room.id, next.id);
   };
-  const sortable = (room: FollowedRoom) => ({
-    onDragStart: (event: React.DragEvent) => {
-      if (!editing || !(event.target as HTMLElement).closest("[data-sort-handle]")) { event.preventDefault(); return; }
-      draggedRef.current = room.id; setDragged(room.id);
-      event.dataTransfer.setData("text/plain", room.id); event.dataTransfer.effectAllowed = "move";
-      const bounds = event.currentTarget.getBoundingClientRect();
-      const preview = event.currentTarget.cloneNode(true) as HTMLElement;
-      preview.classList.add("library-drag-preview");
-      preview.removeAttribute("data-library-room");
-      preview.setAttribute("aria-hidden", "true");
-      Object.assign(preview.style, { position: "fixed", left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, height: `${bounds.height}px` });
-      document.body.appendChild(preview);
-      event.dataTransfer.setDragImage(preview, event.clientX - bounds.left, event.clientY - bounds.top);
-      requestAnimationFrame(() => preview.remove());
-    },
-    onDragOver: (event: React.DragEvent) => {
-      const from = visible.findIndex((item) => item.id === draggedRef.current), to = visible.indexOf(room);
-      if (editing && from >= 0 && from !== to) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTarget({ id: room.id, edge: from < to ? "after" : "before" }); }
-    },
-    onDragLeave: (event: React.DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget((target) => target?.id === room.id ? null : target); },
-    onDrop: (event: React.DragEvent) => {
-      event.preventDefault();
-      if (editing && draggedRef.current) props.onReorder(draggedRef.current, room.id);
-      clearDrag();
-    },
-    onDragEnd: clearDrag,
-  });
   const tools = <>
     <IconButton label="刷新所有房间" disabled={props.refreshingAll || !props.rooms.some((room) => room.followed || props.videos.some((video) => video.id === room.id))} onClick={props.onRefreshAll}><ArrowsClockwise size={18} className={props.refreshingAll ? "animate-spin" : ""} /></IconButton>
     <IconButton label="整理全部" onClick={props.onArrange}><SquaresFour size={18} /></IconButton>
@@ -136,7 +109,7 @@ export function RoomSidebar(props: Props) {
   const sidebar = props.collapsed ? <aside className="sidebar-rail" aria-label="直播工具栏">
     <IconButton label="展开房间列表" onClick={() => props.onCollapse(false)}><CaretRight size={18} /></IconButton>
     <span className="rail-live-count" title={`${liveCount} 个关注正在直播`} aria-label={`${liveCount} 个关注正在直播`}><span className={`status-dot ${liveCount > 0 ? "is-live" : ""}`} />{liveCount}</span>
-    <div className="rail-live-avatars" aria-label="正在直播的关注">{followed.filter((room) => room.liveStatus === true).map((room) => <div key={room.id} className="room-avatar-item is-live" data-library-room={room.id} data-live-status="true">
+    <div className="rail-live-avatars" aria-label="正在直播的关注">{followed.filter((room) => room.liveStatus === true).map((room) => <div key={room.id} className={`room-avatar-item is-live ${props.hoveredId === room.id ? "is-room-hovered" : ""}`} data-library-room={room.id} data-live-status="true">
       <button type="button" aria-label={`房间操作：${roomLabel(room)}`} aria-expanded={avatarMenu?.id === room.id} title={`${roomLabel(room)} · ${platformNames[room.platform]} · 直播中 · 中键打开／关闭画面`} onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => avatarMiddleClick(event, room.id)} onClick={(event) => openAvatarMenu(event, room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} />{props.videos.some((video) => video.id === room.id) && <span className="avatar-layout-badge" aria-label="在布局中" />}</button>
     </div>)}</div>
     {props.focused && <IconButton label="退出聚焦" onClick={props.onExitFocus}><CornersIn size={18} /></IconButton>}
@@ -161,8 +134,8 @@ export function RoomSidebar(props: Props) {
         {tab === "followed" && <IconButton label={props.view === "avatars" ? "切换为列表视图" : "切换为头像视图"} disabled={editing} onClick={() => props.onViewChange(props.view === "avatars" ? "list" : "avatars")}>{props.view === "avatars" ? <List size={16} /> : <SquaresFour size={16} />}</IconButton>}
       </div>
     </div>
-    {editing && <p className="sort-mode-hint">拖动手柄、方向键或上下按钮调整顺序，完成后直播中的房间优先显示。</p>}
-    <div className="room-list" data-sorting={editing}>
+    {editing && <p className="sort-mode-hint">拖动时可用滚轮，靠近边缘加速滚动；也可用方向键或上下按钮，Esc 取消拖动。</p>}
+    <div ref={listRef} className="room-list" data-sorting={editing} data-dragging={Boolean(dragged)}>
       {visible.length === 0 ? <div className="sidebar-empty">{tab === "followed" ? <Star size={24} /> : <ClockCounterClockwise size={24} />}<p>{query ? "没有找到这个房间" : tab === "followed" ? "把常看的主播留在这里" : "最近添加或观看的房间会在这里"}</p><span>{query ? "尝试主播名或房间号" : tab === "followed" ? "点击画面标题栏的星标，添加关注" : "确认房间存在后自动记录，未开播也可关注"}</span></div>
       : <div className={avatarView ? "room-avatar-grid" : undefined}>{visible.map((room) => {
           const video = props.videos.find((item) => item.id === room.id);
@@ -170,12 +143,12 @@ export function RoomSidebar(props: Props) {
           const playbackStatus = video?.status === "error" ? "连接失败" : video?.status === "loading" || video?.isRefreshing ? "连接中" : video ? video.paused ? "已暂停" : "在布局中" : "";
           const dropEdge = dropTarget?.id === room.id ? dropTarget.edge : undefined;
           const dragClass = dragged === room.id ? "is-dragging" : "";
-          if (avatarView) return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} className={`room-avatar-item ${room.liveStatus === true ? "is-live" : ""} ${video ? "is-watching" : ""}`}>
+          if (avatarView) return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} className={`room-avatar-item ${props.hoveredId === room.id ? "is-room-hovered" : ""} ${room.liveStatus === true ? "is-live" : ""} ${video ? "is-watching" : ""}`}>
             <button type="button" aria-label={`房间操作：${roomLabel(room)}`} aria-expanded={avatarMenu?.id === room.id} title={`${roomLabel(room)} · ${platformNames[room.platform]} · ${liveStatus}${playbackStatus ? ` · ${playbackStatus}` : ""} · 中键打开／关闭画面`} onMouseDown={(event) => { if (event.button === 1) event.preventDefault(); }} onAuxClick={(event) => avatarMiddleClick(event, room.id)} onClick={(event) => openAvatarMenu(event, room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} />{video && <span className="avatar-layout-badge" aria-label="在布局中" />}</button>
           </div>;
-          return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} data-drop-edge={dropEdge} className={`room-list-item ${video ? "is-watching" : ""} ${dragClass}`} {...sortable(room)}>
+          return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} data-drop-edge={dropEdge} className={`room-list-item ${props.hoveredId === room.id ? "is-room-hovered" : ""} ${video ? "is-watching" : ""} ${dragClass}`}>
             <div className="flex items-center gap-2">
-              {editing && <button type="button" className="sort-handle" data-sort-handle draggable aria-label={`拖动排序：${roomLabel(room)}`} title="拖动或使用方向键排序" onKeyDown={(event) => sortKeys(event, room)}><DotsSixVertical size={15} /></button>}
+              {editing && <button type="button" className="sort-handle" data-sort-handle aria-label={`拖动排序：${roomLabel(room)}`} title="拖动时可用滚轮；方向键排序" onPointerDown={(event) => beginDrag(event, room.id)} onKeyDown={(event) => sortKeys(event, room)}><DotsSixVertical size={15} /></button>}
               <button type="button" className="room-open-button" onClick={() => { if (!editing) props.onOpen(room.id); }} title={room.title || roomLabel(room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} /><span className="min-w-0 flex-1"><span className="room-name">{roomLabel(room)}</span></span></button>
               {editing ? <div className="sort-move-buttons">
                 <IconButton label={`上移：${roomLabel(room)}`} disabled={visible[0]?.id === room.id} onClick={() => props.onReorder(room.id, visible[visible.indexOf(room) - 1].id)}><ArrowUp size={14} /></IconButton>

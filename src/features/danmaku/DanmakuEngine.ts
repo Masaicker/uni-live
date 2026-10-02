@@ -29,6 +29,7 @@ interface ActiveItem {
   el: HTMLDivElement;
   lane: number;
   endAt: number;
+  animation: Animation;
 }
 
 const DEFAULT_COLOR = "#ffffff";
@@ -40,6 +41,7 @@ export class DanmakuEngine {
   private active: ActiveItem[] = [];
   private laneReleaseAt: number[] = [];
   private laneCount = 0;
+  private containerWidth = 0;
   private rafId = 0;
   private destroyed = false;
   private resizeObserver: ResizeObserver | null = null;
@@ -58,9 +60,8 @@ export class DanmakuEngine {
     };
     this.applyContainerStyle();
     this.recalcLanes();
-    this.resizeObserver = new ResizeObserver(() => this.recalcLanes());
+    this.resizeObserver = new ResizeObserver(() => { this.recalcLanes(); this.wake(); });
     this.resizeObserver.observe(container);
-    this.tick();
   }
 
   setOpacity(opacity: number) {
@@ -81,10 +82,11 @@ export class DanmakuEngine {
     if (this.options.fontSize === next) return;
     this.options.fontSize = next;
     // Old lane spacing no longer fits after a font change; new messages use fresh lanes.
-    this.active.forEach(({ el }) => el.remove());
+    this.active.forEach((item) => this.removeBullet(item));
     this.active = [];
     this.laneReleaseAt = [];
     this.recalcLanes();
+    this.wake();
   }
 
   push(text: string, opts: DanmakuPushOptions = {}) {
@@ -107,13 +109,15 @@ export class DanmakuEngine {
         -Math.floor(this.options.queueShedThreshold * 0.6)
       );
     }
+    this.wake();
   }
 
   destroy() {
     this.destroyed = true;
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.resizeObserver?.disconnect();
-    this.active.forEach(({ el }) => el.remove());
+    this.rafId = 0;
+    this.active.forEach((item) => this.removeBullet(item));
     this.active = [];
     this.queue = [];
   }
@@ -128,7 +132,8 @@ export class DanmakuEngine {
 
   private recalcLanes() {
     const laneHeight = this.options.fontSize + 8;
-    const height = this.container.clientHeight || window.innerHeight;
+    this.containerWidth = this.container.clientWidth;
+    const height = this.container.clientHeight;
     const count = Math.max(1, Math.floor(height / laneHeight));
     this.laneCount = count;
     if (this.laneReleaseAt.length < count) {
@@ -141,18 +146,29 @@ export class DanmakuEngine {
   }
 
   private tick = () => {
+    this.rafId = 0;
     if (this.destroyed) return;
     this.pruneExpired();
     this.shedStaleQueue();
     this.spawnWhilePossible();
-    this.rafId = requestAnimationFrame(this.tick);
+    this.wake();
   };
+
+  private wake() {
+    if (!this.destroyed && !this.rafId && this.queue.length) this.rafId = requestAnimationFrame(this.tick);
+  }
+
+  private removeBullet(item: ActiveItem) {
+    item.animation.onfinish = null;
+    item.animation.cancel();
+    item.el.remove();
+  }
 
   private pruneExpired() {
     const now = performance.now();
-    this.active = this.active.filter(({ el, endAt }) => {
-      if (now >= endAt) {
-        el.remove();
+    this.active = this.active.filter((item) => {
+      if (now >= item.endAt) {
+        this.removeBullet(item);
         return false;
       }
       return true;
@@ -160,7 +176,7 @@ export class DanmakuEngine {
 
     while (this.active.length > this.options.maxActive) {
       const oldest = this.active.shift();
-      oldest?.el.remove();
+      if (oldest) this.removeBullet(oldest);
     }
   }
 
@@ -181,20 +197,30 @@ export class DanmakuEngine {
   }
 
   private spawnWhilePossible() {
-    const containerWidth = this.container.clientWidth;
-    if (containerWidth <= 0) return;
+    if (!this.queue.length || this.containerWidth <= 0) return;
+
+    const pending: { el: HTMLDivElement; lane: number }[] = [];
+    const fragment = document.createDocumentFragment();
 
     let guard = 0;
     while (this.queue.length > 0 && guard++ < 8) {
-      if (this.active.length >= this.options.maxActive) break;
+      if (this.active.length + pending.length >= this.options.maxActive) break;
 
       const lane = this.findAvailableLane();
       if (lane < 0) break;
 
       const item = this.dequeueNext();
       if (!item) break;
-      this.spawnBullet(item, lane, containerWidth);
+      const el = this.createBullet(item);
+      this.laneReleaseAt[lane] = Infinity;
+      pending.push({ el, lane });
+      fragment.appendChild(el);
     }
+    if (!pending.length) return;
+    this.container.appendChild(fragment);
+    // Batch all measurements before animation writes to avoid layout per message.
+    const widths = pending.map(({ el }) => el.offsetWidth);
+    pending.forEach(({ el, lane }, index) => this.animateBullet(el, lane, widths[index]));
   }
 
   private findAvailableLane(): number {
@@ -205,7 +231,7 @@ export class DanmakuEngine {
     return -1;
   }
 
-  private spawnBullet(item: QueuedItem, lane: number, containerWidth: number) {
+  private createBullet(item: QueuedItem) {
     const el = document.createElement("div");
     el.textContent = item.text;
     el.className = "danmaku-item";
@@ -222,12 +248,13 @@ export class DanmakuEngine {
       "text-shadow:1px 1px 2px rgba(0,0,0,0.85)",
     ].join(";");
 
-    this.container.appendChild(el);
+    return el;
+  }
 
-    const width = el.offsetWidth;
+  private animateBullet(el: HTMLDivElement, lane: number, width: number) {
     const laneHeight = this.options.fontSize + 8;
     const y = lane * laneHeight + 4;
-    const startX = containerWidth;
+    const startX = this.containerWidth;
     const endX = -width;
     const distance = startX - endX;
     const durationMs = (distance / this.options.speed) * 1000;
@@ -237,7 +264,7 @@ export class DanmakuEngine {
 
     el.style.transform = `translate(${startX}px, ${y}px)`;
 
-    el.animate(
+    const animation = el.animate(
       [
         { transform: `translate(${startX}px, ${y}px)` },
         { transform: `translate(${endX}px, ${y}px)` },
@@ -250,6 +277,13 @@ export class DanmakuEngine {
     );
 
     this.laneReleaseAt[lane] = now + gapDurationMs;
-    this.active.push({ el, lane, endAt: now + durationMs + 50 });
+    const active = { el, lane, endAt: now + durationMs + 50, animation };
+    this.active.push(active);
+    animation.onfinish = () => {
+      this.removeBullet(active);
+      const index = this.active.indexOf(active);
+      if (index >= 0) this.active.splice(index, 1);
+      this.wake();
+    };
   }
 }
