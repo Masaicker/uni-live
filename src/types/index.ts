@@ -55,6 +55,7 @@ export interface MonitorVideo extends FollowedRoom {
   status: VideoStatus;
   muted: boolean;
   paused: boolean;
+  followingLive: boolean;
   qualities: QualityOption[];
   selectedQuality?: QualityOption;
   warning?: string;

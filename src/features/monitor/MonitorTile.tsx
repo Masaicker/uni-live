@@ -40,6 +40,7 @@ interface Props {
   onQuality: (rate?: number, qn?: IQnType) => void;
   onPlaybackError: (message: string) => void;
   onPaused: (paused: boolean) => void;
+  onFollowingLive: (followingLive: boolean) => void;
   onPlaying: () => void;
   onReady: () => void;
 }
@@ -56,9 +57,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const { video } = props;
   const latest = useRef(props);
   latest.current = props;
-  const [followingLive, setFollowingLive] = useState(true);
   const setPaused = useCallback((paused: boolean) => {
-    if (paused) setFollowingLive(false);
     latest.current.onPaused(paused);
   }, []);
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
@@ -88,8 +87,6 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
   const mediaOptions = timelineOptions(video.stream, video.platform);
   const compact = props.thumbnail && !fullscreen;
-
-  useEffect(() => { setFollowingLive(true); }, [video.stream, video.playbackKey]);
 
   useEffect(() => {
     const update = () => {
@@ -261,7 +258,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || (event.target as HTMLElement).closest("button, input, select, a, .playback-controls")) return;
       event.preventDefault(); void toggleFullscreen();
     }}>
-      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} followingLive={followingLive} mediaRef={media} timelineOptions={mediaOptions}
+      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} followingLive={video.followingLive} mediaRef={media} timelineOptions={mediaOptions}
         onAudioChange={props.onAudio} onError={props.onPlaybackError} onPlay={props.onPlaying} onReady={props.onReady} onPause={() => { if (video.paused) props.onPaused(true); }}
         onTimeline={(timeline) => playbackControls.current?.report(timeline)}
         onReplayExpired={() => showFeedback("较早的缓存已过期，已移到最早可播位置")}
@@ -272,7 +269,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
         onSeek={(time, follow = false) => {
           const player = media.current;
           if (!player || !seekInMedia(player, time, mediaOptions)) return false;
-          setFollowingLive(follow);
+          props.onFollowingLive(follow);
           return true;
         }}
         onFullscreen={() => void toggleFullscreen()} />}

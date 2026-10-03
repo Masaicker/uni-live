@@ -216,7 +216,7 @@ export function LiveRoomClient(share: LegacyShare) {
       if (selection && active.stream) playbackBackups.current.set(id, { stream: active.stream, qnName: active.qnName, preferredRate: active.preferredRate, selectedQuality: active.selectedQuality, qualities: active.qualities, warning: active.warning, key, expires: Date.now() + 20000 });
       const playback: PlaybackResult = result;
       send({ type: "room", id, patch: { qnName: requested.qn, preferredRate: requested.rate } });
-      send({ type: "video", id, patch: { stream: playback.stream, streamType: streamType.current, playbackKey: key, qualities: playback.qualities ?? [], selectedQuality: playback.selectedQuality, warning: playback.warning, isRefreshing: false, status: "loading", errorMessage: undefined } });
+      send({ type: "video", id, patch: { stream: playback.stream, streamType: streamType.current, playbackKey: key, followingLive: true, qualities: playback.qualities ?? [], selectedQuality: playback.selectedQuality, warning: playback.warning, isRefreshing: false, status: "loading", errorMessage: undefined } });
     } catch (error) {
       if (controller.signal.aborted || streamRequests.current.get(id) !== controller) return;
       const active = current.current.videos.find((v) => v.id === id);
@@ -415,7 +415,7 @@ export function LiveRoomClient(share: LegacyShare) {
     if (backup && backup.key === key && backup.expires >= Date.now()) {
       const original = { stream: backup.stream, qnName: backup.qnName, preferredRate: backup.preferredRate, selectedQuality: backup.selectedQuality, qualities: backup.qualities, warning: backup.warning };
       send({ type: "room", id, patch: { qnName: original.qnName, preferredRate: original.preferredRate } });
-      send({ type: "video", id, patch: { ...original, playbackKey: key + 1, status: "loading", errorMessage: undefined } });
+      send({ type: "video", id, patch: { ...original, playbackKey: key + 1, followingLive: true, status: "loading", errorMessage: undefined } });
       notify("所选画质无法播放，已恢复原画质");
     } else send({ type: "video", id, patch: { status: "error", errorMessage: message } });
   };
@@ -430,9 +430,19 @@ export function LiveRoomClient(share: LegacyShare) {
     for (const [id, controller] of recoveryRequests.current) { controller.abort(); send({ type: "video", id, patch: { isRefreshing: false } }); }
     recoveryRequests.current.clear();
   };
+  const changePlaybackIntent = (id: string, patch: Partial<Pick<MonitorVideo, "paused" | "followingLive">>) => {
+    const protecting = patch.paused === true || patch.followingLive === false;
+    const controller = recoveryRequests.current.get(id);
+    if (protecting) {
+      controller?.abort();
+      recoveryRequests.current.delete(id);
+    }
+    send({ type: "video", id, patch: { ...patch, ...(patch.paused ? { followingLive: false } : {}),
+      ...(controller && protecting ? { isRefreshing: false } : {}) } });
+  };
   const recoveryEvent = async (id: string, key: number, event: RecoveryEvent) => {
     const video = current.current.videos.find((video) => video.id === id);
-    if (!video || video.playbackKey !== key || !recoveryPreferences.current.enabled) return;
+    if (!video || video.playbackKey !== key || !video.followingLive || !recoveryPreferences.current.enabled) return;
     if (event === "recovered") { send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); return; }
     if (event === "exhausted") { send({ type: "video", id, patch: { status: "error", errorMessage: `自动恢复已尝试 ${recoveryPreferences.current.maxAttempts} 次，请手动重试` } }); return; }
     if (video.paused || video.isRefreshing || streamRequests.current.has(id) || recoveryRequests.current.has(id) || document.visibilityState !== "visible" || !navigator.onLine) return;
@@ -442,7 +452,7 @@ export function LiveRoomClient(share: LegacyShare) {
     try {
       const info = await loadMetadata(id, controller.signal);
       const active = current.current.videos.find((video) => video.id === id);
-      if (controller.signal.aborted || !active || active.playbackKey !== key || active.paused || document.visibilityState !== "visible" || !navigator.onLine) return;
+      if (controller.signal.aborted || !active || active.playbackKey !== key || !active.followingLive || active.paused || document.visibilityState !== "visible" || !navigator.onLine) return;
       if (info?.liveStatus === false) { send({ type: "video", id, patch: { recoveryStopped: true, status: "error", errorMessage: "主播已下播，已停止自动恢复" } }); return; }
       await loadStream(id, undefined, controller.signal);
     } finally {
@@ -476,7 +486,8 @@ export function LiveRoomClient(share: LegacyShare) {
           onAudio={(id, muted, volume) => send({ type: "audio", id, muted, volume })} onClose={stopWatching} onRefresh={refresh}
           onDanmaku={(id) => { const video = current.current.videos.find((v) => v.id === id); if (video) send({ type: "danmaku", id, enabled: !video.danmakuEnabled }); }}
           onFollow={changeFollow} recovery={recovery} onRecoveryEvent={(id, key, event) => void recoveryEvent(id, key, event)}
-          onPlaybackError={playbackError} onPaused={(id, paused) => send({ type: "video", id, patch: { paused } })}
+          onPlaybackError={playbackError} onPaused={(id, paused) => changePlaybackIntent(id, { paused })}
+          onFollowingLive={(id, followingLive) => changePlaybackIntent(id, { followingLive })}
           onReady={(id, key) => { const video = current.current.videos.find((video) => video.id === id); if (video?.playbackKey === key && video.paused) send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); }}
           onPlaying={(id, key) => send({ type: "playing", id, key, at: Date.now() })} />
           : <div className="workspace-empty"><div className="empty-icon"><SquaresFour size={30} weight="light" /></div>

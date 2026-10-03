@@ -7,7 +7,7 @@ import { followedRooms, retainRooms } from "./library";
 export const initialMonitorState: MonitorState = { rooms: [], videos: [], manual: false, focus: null, fullscreen: null };
 
 export function createVideo(room: FollowedRoom, layout = room.layout ?? defaultLayout): MonitorVideo {
-  return { ...room, stream: "", streamType: "flv", playbackKey: 0, layout: { ...layout }, status: "idle", muted: true, paused: false, qualities: [], isRefreshing: false, recoveryKey: 0 };
+  return { ...room, stream: "", streamType: "flv", playbackKey: 0, layout: { ...layout }, status: "idle", muted: true, paused: false, followingLive: true, qualities: [], isRefreshing: false, recoveryKey: 0 };
 }
 
 export type MonitorAction =

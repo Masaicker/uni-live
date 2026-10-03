@@ -28,7 +28,7 @@ export function usePlaybackRecovery(media: React.RefObject<HTMLVideoElement | nu
         key: current.playbackKey,
         time: available ? player.currentTime : undefined,
         frames: available ? player.getVideoPlaybackQuality?.().totalVideoFrames : undefined,
-        blocked: current.paused || current.isRefreshing || current.recoveryStopped === true
+        blocked: !current.followingLive || current.paused || current.isRefreshing || current.recoveryStopped === true
           || document.visibilityState !== "visible" || !navigator.onLine
           || (available && player.seeking),
       }, preferences);

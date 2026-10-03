@@ -29,6 +29,7 @@ interface Props {
   onRecoveryEvent: (id: string, key: number, event: RecoveryEvent) => void;
   onPlaybackError: (id: string, key: number, message: string) => void;
   onPaused: (id: string, paused: boolean) => void;
+  onFollowingLive: (id: string, followingLive: boolean) => void;
   onPlaying: (id: string, key: number) => void;
   onReady: (id: string, key: number) => void;
 }
@@ -107,6 +108,7 @@ const MonitorPosition = memo(function MonitorPosition({ video, focused, thumbnai
       onDanmaku={() => actions.current.onDanmaku(video.id)} onFollow={(followed) => actions.current.onFollow(video.id, followed)}
       recovery={recovery} onRecoveryEvent={(key, event) => actions.current.onRecoveryEvent(video.id, key, event)}
       onPlaybackError={(message) => actions.current.onPlaybackError(video.id, video.playbackKey, message)}
+      onFollowingLive={(followingLive) => actions.current.onFollowingLive(video.id, followingLive)}
       onPaused={(paused) => actions.current.onPaused(video.id, paused)} onPlaying={() => actions.current.onPlaying(video.id, video.playbackKey)} onReady={() => actions.current.onReady(video.id, video.playbackKey)} />
   </div>;
 });
