@@ -22,7 +22,7 @@ function sourceFingerprint(root) {
       hash.update(relative.replaceAll("\\", "/")).update("\0").update(content).update("\0");
     }
   };
-  for (const relative of ["app", "src", "public", "package.json", "package-lock.json", "next.config.ts", "tsconfig.json", "tailwind.config.ts", "postcss.config.mjs", "eslint.config.mjs", ".eslintrc.json", ".npmrc"]) add(relative);
+  for (const relative of ["app", "src", "public", "scripts", "package.json", "package-lock.json", "next.config.ts", "tsconfig.json", "tailwind.config.ts", "postcss.config.mjs", "eslint.config.mjs", ".eslintrc.json", ".npmrc"]) add(relative);
   return hash.digest("hex");
 }
 

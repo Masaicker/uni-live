@@ -33,3 +33,13 @@ test("production fingerprints detect changed, added and absent sources while ign
   fs.writeFileSync(path.join(fixture, ".cache", "production", "BUILD_ID"), "different-build");
   assert.equal(needsBuild(fixture), true);
 });
+
+test("playback build patches participate in production cache invalidation", () => {
+  const fixture = path.join(__dirname, "..", ".cache", "qa", `build-${randomUUID()}`);
+  fs.mkdirSync(path.join(fixture, "scripts"), { recursive: true });
+  const loader = path.join(fixture, "scripts", "flv-aac-loader.cjs");
+  fs.writeFileSync(loader, "module.exports = source => source;");
+  const original = sourceFingerprint(fixture);
+  fs.writeFileSync(loader, "module.exports = source => patch(source);");
+  assert.notEqual(sourceFingerprint(fixture), original);
+});
