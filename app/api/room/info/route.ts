@@ -1,6 +1,6 @@
 import axios from "axios";
 import { NextResponse } from "next/server";
-import { getRealRid_Douyu } from "@/lib/reallive/douyu/realrid";
+import { getDouyuRoom } from "@/lib/reallive/douyu/realrid";
 import { getRealRid_Bilibili } from "@/lib/reallive/bilibili/realrid";
 import type { RoomInfo } from "@/types";
 import { BILIBILI_DISABLED_MESSAGE, isPlatformEnabled } from "@/lib/platform-support";
@@ -16,10 +16,9 @@ export async function POST(request: Request) {
     }
     let info: RoomInfo;
     if (platform === "douyu") {
-      const realRid = String(await getRealRid_Douyu(rid));
-      const { data } = await axios.get(`https://www.douyu.com/betard/${realRid}`, options);
-      const room = data?.room;
-      if (!room || !/^\d+$/.test(realRid) || Number(realRid) <= 0 || !String(room.owner_name ?? "").trim()) throw new Error("Room metadata unavailable");
+      const room = await getDouyuRoom(rid);
+      const realRid = String(room.room_id);
+      if (!String(room.owner_name ?? "").trim()) throw new Error("Room metadata unavailable");
       info = { platform, rid: realRid, anchorName: String(room.owner_name ?? ""), title: String(room.room_name ?? ""), avatarUrl: String(room.owner_avatar ?? ""), liveStatus: room.show_status !== undefined ? Number(room.show_status) === 1 && Number(room.videoLoop) !== 1 : null };
     } else if (platform === "bilibili") {
       const realRid = String(await getRealRid_Bilibili(rid));
