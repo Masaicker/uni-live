@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Browser, ClipboardText, ArrowSquareOut } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
+import { Browser, ClipboardText, ArrowSquareOut, CheckCircle, WarningCircle, ArrowsClockwise, CaretDown, Trash } from "@phosphor-icons/react";
 import { normalizeDouyuLoginCookie, readDouyuCookie, saveDouyuCookie } from "@/lib/douyu-cookie";
 import { RoomAvatar } from "./RoomAvatar";
 
@@ -10,17 +10,13 @@ const LOGIN_ID_KEY = "uni-live.douyu-login-id";
 export function DouyuAccountPanel() {
   const [hasCookie, setHasCookie] = useState(false);
   const [input, setInput] = useState("");
+  const [showCookieInput, setShowCookieInput] = useState(false);
   const [loginId, setLoginId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageKind, setMessageKind] = useState<"info" | "success" | "error">("info");
   const [checking, setChecking] = useState(false);
   const [validation, setValidation] = useState<"unchecked" | "valid" | "invalid">("unchecked");
-
-  useEffect(() => {
-    setHasCookie(Boolean(readDouyuCookie()));
-    setLoginId(sessionStorage.getItem(LOGIN_ID_KEY));
-  }, []);
 
   useEffect(() => {
     if (!loginId) return;
@@ -109,19 +105,21 @@ export function DouyuAccountPanel() {
     }
   };
 
-  const checkCookie = async (save: boolean) => {
+  const checkCookie = useCallback(async (value: string, save: boolean, signal?: AbortSignal) => {
     setChecking(true);
-    setMessage("正在检测 Cookie...");
+    setMessage("");
     setMessageKind("info");
+    if (!save) setValidation("unchecked");
     try {
-      const cookie = normalizeDouyuLoginCookie(save ? input : readDouyuCookie());
+      const cookie = normalizeDouyuLoginCookie(value);
       const response = await fetch("/api/account/douyu/cookie", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cookie }),
-        signal: AbortSignal.timeout(15000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
       });
       const result = await response.json();
+      if (signal?.aborted) return;
       if (!response.ok || result.valid !== true) {
         if (!save && result.valid === false) setValidation("invalid");
         throw new Error(result.error || "检测失败，请稍后重试");
@@ -130,77 +128,89 @@ export function DouyuAccountPanel() {
         saveDouyuCookie(cookie);
         setHasCookie(true);
         setInput("");
+        setShowCookieInput(false);
       }
       setValidation("valid");
-      setMessage(save ? "Cookie 有效，已保存，斗鱼画面正在重新加载" : "Cookie 有效");
+      setMessage(save ? "Cookie 已保存，斗鱼画面正在重新加载" : "");
       setMessageKind("success");
     } catch (error) {
+      if (signal?.aborted) return;
       setMessage(error instanceof Error && error.name !== "TimeoutError" && error.name !== "TypeError" ? error.message : "暂时无法检测，请稍后重试");
       setMessageKind("error");
     } finally {
-      setChecking(false);
+      if (!signal?.aborted) setChecking(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const cookie = readDouyuCookie();
+    const pendingLogin = sessionStorage.getItem(LOGIN_ID_KEY);
+    setHasCookie(Boolean(cookie));
+    setLoginId(pendingLogin);
+    if (!cookie || pendingLogin) return;
+    const controller = new AbortController();
+    void checkCookie(cookie, false, controller.signal);
+    return () => controller.abort();
+  }, [checkCookie]);
 
   const busy = starting || Boolean(loginId) || checking;
-  const status = starting || loginId ? "等待登录" : checking ? "检测中" : hasCookie ? validation === "valid" ? "登录有效" : validation === "invalid" ? "登录无效" : "已保存 Cookie" : "未登录 · 匿名播放";
+  const statusState = busy ? "pending" : hasCookie ? validation === "unchecked" ? "saved" : validation : "unchecked";
+  const status = starting || loginId ? "等待登录" : checking ? "正在验证" : hasCookie ? validation === "valid" ? "已登录 · Cookie 有效" : validation === "invalid" ? "登录已失效" : "Cookie 已保存 · 待验证" : "未登录";
 
   return (
     <section className="account-platform" aria-labelledby="douyu-account-title">
       <div className="account-platform-heading">
         <div className="account-platform-name"><RoomAvatar platform="douyu" /><h3 id="douyu-account-title">斗鱼</h3></div>
-        <span className="account-platform-status" data-state={hasCookie ? validation : "unchecked"}>{status}</span>
+        <span className="account-platform-status" role="status" data-state={statusState}>
+          {busy ? <ArrowsClockwise size={15} className="animate-spin" /> : hasCookie && validation === "valid" ? <CheckCircle size={16} weight="fill" /> : <WarningCircle size={16} />}
+          {status}
+        </span>
       </div>
-      <p>登录后可获取账号可用画质。</p>
+      <p className="account-benefits">登录可避免匿名观看约 300 秒后断流，并解锁账号可用的最高画质。</p>
+      {hasCookie && <div className="account-cookie-tools">
+        <span>已保存 Cookie</span>
+        <button type="button" disabled={busy} onClick={() => void checkCookie(readDouyuCookie(), false)}><ArrowsClockwise size={14} />重新检测</button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => { saveDouyuCookie(""); setHasCookie(false); setValidation("unchecked"); setMessage("Cookie 已清除，恢复匿名播放"); setMessageKind("info"); }}
+          className="account-clear-cookie"
+        ><Trash size={14} />清除</button>
+      </div>}
       <div className="account-login-methods">
-        <section className="account-login-method" aria-labelledby="douyu-browser-login">
-          <h4 id="douyu-browser-login"><Browser size={17} />浏览器登录</h4>
-          <p>在登录窗口完成后自动保存 Cookie。</p>
-          <div className="account-method-actions">
-            <button type="button" aria-label="打开浏览器登录斗鱼" onClick={() => void startLogin()} disabled={busy} className="primary-button">
-              {starting ? "正在打开..." : loginId ? "等待登录..." : "打开浏览器登录"}
-            </button>
-            {loginId && <button type="button" onClick={() => void cancelLogin()} className="subtle-button">取消登录</button>}
-          </div>
-        </section>
-        <section className="account-login-method" aria-labelledby="douyu-cookie-login">
-          <div className="account-method-heading">
-            <h4 id="douyu-cookie-login"><ClipboardText size={17} />粘贴 Cookie</h4>
-            <a href="https://www.douyu.com/" target="_blank" rel="noreferrer" aria-label="在当前浏览器打开斗鱼">打开斗鱼<ArrowSquareOut size={13} /></a>
-          </div>
-          <p>登录后，从 F12 → 网络 → 请求标头复制 Cookie。</p>
-          <textarea
-            aria-label="斗鱼 Cookie"
-            value={input}
-            disabled={checking}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="完整 Cookie（可含 Cookie: 前缀）"
-            rows={4}
-            spellCheck={false}
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-accent"
-          />
-          <div className="account-method-actions">
-            <button type="button" onClick={() => void checkCookie(true)} disabled={busy || !input.trim()} className="primary-button">
-              {checking ? "正在检测..." : "检测并保存"}
-            </button>
-          </div>
-        </section>
+        <button type="button" aria-label="打开浏览器登录斗鱼" onClick={() => void startLogin()} disabled={busy} className="account-login-choice">
+          <Browser size={21} />
+          <span><strong>{starting ? "正在打开..." : loginId ? "等待登录..." : hasCookie ? "重新登录" : "浏览器登录"}</strong><small>本机登录后自动保存</small></span>
+        </button>
+        <button type="button" onClick={() => setShowCookieInput(!showCookieInput)} disabled={busy} aria-expanded={showCookieInput} aria-controls="douyu-cookie-input" className="account-login-choice">
+          <ClipboardText size={21} />
+          <span><strong>粘贴 Cookie</strong><small>手动导入，适合远程部署</small></span>
+          <CaretDown size={15} className={showCookieInput ? "is-expanded" : ""} />
+        </button>
       </div>
-      {hasCookie && (
-        <div className="account-platform-actions">
-          <button type="button" disabled={busy} onClick={() => void checkCookie(false)} className="subtle-button">检测已保存 Cookie</button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => { saveDouyuCookie(""); setHasCookie(false); setValidation("unchecked"); setMessage("Cookie 已清除，恢复匿名播放"); setMessageKind("info"); }}
-            className="text-xs text-danger disabled:opacity-50"
-          >
-            清除 Cookie
+      {loginId && <div className="account-method-actions"><button type="button" onClick={() => void cancelLogin()} className="subtle-button">取消登录</button></div>}
+      {showCookieInput && <div id="douyu-cookie-input" className="account-cookie-input">
+        <div className="account-method-heading"><label htmlFor="douyu-cookie-value">手动导入 Cookie</label><a href="https://www.douyu.com/" target="_blank" rel="noreferrer" aria-label="在当前浏览器打开斗鱼">打开斗鱼<ArrowSquareOut size={13} /></a></div>
+        <p>登录后，从 F12 → 网络 → 请求标头复制 Cookie。</p>
+        <textarea
+          id="douyu-cookie-value"
+          aria-label="斗鱼 Cookie"
+          value={input}
+          disabled={busy}
+          onChange={(event) => setInput(event.target.value)}
+          placeholder="完整 Cookie（可含 Cookie: 前缀）"
+          rows={4}
+          spellCheck={false}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs outline-none focus:border-accent"
+        />
+        <div className="account-method-actions">
+          <button type="button" onClick={() => void checkCookie(input, true)} disabled={busy || !input.trim()} className="primary-button">
+            {checking ? "正在检测..." : "检测并保存"}
           </button>
         </div>
-      )}
+      </div>}
       {message && <p role="status" className="account-feedback" data-kind={messageKind}>{message}</p>}
-      <p className="account-storage-note">Cookie 保存在当前浏览器，经本应用后端用于取流；失效后需重新登录。</p>
+      <p className="account-storage-note">登录信息仅保存在当前浏览器，失效后需重新登录。</p>
     </section>
   );
 }

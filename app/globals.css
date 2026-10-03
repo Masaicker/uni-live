@@ -245,21 +245,37 @@
   .settings-content p { font-size: 12px; color: #989fa9; line-height: 1.8; }
   .account-platform { padding: 18px; border: 1px solid #30343b; border-radius: 10px; }
   .account-platform-heading, .account-platform-name, .account-method-heading { display: flex; align-items: center; gap: 10px; }
-  .account-platform-heading { justify-content: space-between; flex-wrap: wrap; margin-bottom: 10px; }
+  .account-platform-heading { justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; }
   .account-platform-name h3 { margin: 0; font-size: 14px; }
-  .account-platform-status { font-size: 11px; color: #989fa9; }
-  .account-platform-status[data-state=valid] { color: #86cba5; }
-  .account-platform-status[data-state=invalid] { color: #df9292; }
-  .account-login-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-  .account-login-method { min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid #30343b; border-radius: 8px; background: #1e2125; }
-  .account-login-method h4 { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
-  .account-login-method h4 svg { color: #989fa9; flex-shrink: 0; }
+  .account-platform-status { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid #434a54; border-radius: 6px; background: #ffffff08; font-size: 12px; font-weight: 500; color: #c1c6d0; }
+  .account-platform-status[data-state=valid] { color: #a1e4bc; background: #37845a26; border-color: #529b6e70; }
+  .account-platform-status[data-state=invalid] { color: #f0abab; background: #9f454526; border-color: #bb626270; }
+  .account-platform-status[data-state=saved] { color: #e5c183; background: #a07d3320; border-color: #a07d3370; }
+  .account-platform-status[data-state=pending] { color: #a7bff6; background: #8aabf518; border-color: #8aabf540; }
+  .account-platform-status svg { flex-shrink: 0; }
+  .settings-content .account-benefits { color: #b5bac3; }
+  .account-cookie-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; }
+  .account-cookie-tools > span { margin-right: auto; color: #989fa9; font-size: 11px; }
+  .account-cookie-tools button { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; font-size: 11px; color: #b5bac3; }
+  .account-cookie-tools button:hover { color: #e8eaed; }
+  .account-cookie-tools button.account-clear-cookie { color: #df9292; }
+  .account-login-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+  .account-login-choice { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 13px 12px; border: 1px solid #34383f; border-radius: 8px; background: #22252a; text-align: left; }
+  .account-login-choice:hover, .account-login-choice[aria-expanded=true] { background: #292e36; border-color: #8aabf570; }
+  .account-login-choice > svg { flex-shrink: 0; color: #a7bff6; }
+  .account-login-choice > span { flex: 1; min-width: 0; }
+  .account-login-choice strong, .account-login-choice small { display: block; }
+  .account-login-choice strong { color: #e8eaed; font-size: 12px; font-weight: 500; }
+  .account-login-choice small { margin-top: 4px; color: #989fa9; font-size: 10px; line-height: 1.5; }
+  .account-login-choice .is-expanded { transform: rotate(180deg); }
+  .account-cookie-input { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 14px; border: 1px solid #34383f; border-radius: 8px; background: #15171a; }
+  .account-cookie-input label { font-size: 12px; color: #c1c6d0; }
+  .account-cookie-input textarea { resize: vertical; }
   .account-method-heading { justify-content: space-between; gap: 6px; flex-wrap: wrap; }
   .account-method-heading a { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #a7bff6; }
   .account-method-heading a:hover { text-decoration: underline; }
-  .account-method-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+  .account-method-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .account-method-actions button { font-size: 12px; }
-  .account-platform-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid #30343b; }
   .account-feedback, .account-storage-note { margin-top: 14px; }
   .account-feedback[data-kind=success] { color: #86cba5; }
   .account-feedback[data-kind=error] { color: #df9292; }

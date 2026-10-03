@@ -291,6 +291,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
         </select>
       </label> : null}
       <button onClick={async () => setCopyStatus(await copyText(video.stream) ? "播放地址已复制" : "复制失败，请检查剪贴板权限")} disabled={!video.stream}><Copy size={16} />复制播放地址</button>
+      <button onClick={async () => setCopyStatus(await copyText(video.url) ? "直播间地址已复制" : "复制失败，请检查剪贴板权限")}><Copy size={16} />复制直播间地址</button>
       <a href={video.url} target="_blank" rel="noreferrer"><ArrowSquareOut size={16} />打开原始直播间</a>
       {copyStatus && <p role="status">{copyStatus}</p>}
       {video.warning && <p className="text-warning">{video.warning}</p>}
