@@ -6,8 +6,8 @@ import { IconButton } from "./IconButton";
 import type { IQnType } from "@/types";
 import { qualities } from "@/features/monitor/storage";
 import type { RecoveryPreferences } from "@/features/video/playback-watchdog";
-export interface DanmakuPreferences { opacity: number; density: number; speed: number; fontSize: number; thumbnailFontSize: number }
-export const DEFAULT_DANMAKU_PREFERENCES: DanmakuPreferences = { opacity: 90, density: 20, speed: 120, fontSize: 20, thumbnailFontSize: 12 };
+export interface DanmakuPreferences { opacity: number; density: number; speed: number; fontSize: number; thumbnailFontSize: number; douyuMinLevel: number }
+export const DEFAULT_DANMAKU_PREFERENCES: DanmakuPreferences = { opacity: 90, density: 20, speed: 120, fontSize: 20, thumbnailFontSize: 12, douyuMinLevel: 0 };
 type Tab = "video" | "danmaku" | "account" | "help" | "project";
 export type SettingsFocus = { tab?: Tab; subTab?: "add" | "settings" };
 interface Props { open: boolean; onClose: () => void; quality: IQnType; onQualityChange: (value: IQnType) => void; danmaku: DanmakuPreferences; onDanmakuChange: (value: DanmakuPreferences) => void; autoFocusAudio: boolean; onAutoFocusAudioChange: (value: boolean) => void; autoFocusDanmaku: boolean; onAutoFocusDanmakuChange: (value: boolean) => void; recovery: RecoveryPreferences; onRecoveryChange: (value: RecoveryPreferences) => void; onShare: () => void; hasVideos: boolean }
@@ -50,6 +50,8 @@ export function SettingsPanel({ open, onClose, quality, onQualityChange, danmaku
           <Range label="不透明度" value={danmaku.opacity} min={0} max={100} suffix="%" onChange={(opacity) => onDanmakuChange({ ...danmaku, opacity })} />
           <Range label="弹幕间距" value={danmaku.density} min={0} max={300} suffix="px" onChange={(density) => onDanmakuChange({ ...danmaku, density })} />
           <Range label="滚动速度" value={danmaku.speed} min={40} max={400} suffix="px/s" onChange={(speed) => onDanmakuChange({ ...danmaku, speed })} />
+          <div><Range label="斗鱼最低用户等级" value={danmaku.douyuMinLevel} min={0} max={200} suffix="级" displayValue={danmaku.douyuMinLevel === 0 ? "不屏蔽" : undefined} onChange={(douyuMinLevel) => onDanmakuChange({ ...danmaku, douyuMinLevel })} />
+            <p className="mt-3">仅斗鱼生效，屏蔽低于所选用户等级的弹幕；0 表示不屏蔽。</p></div>
           <button className="subtle-button" onClick={() => onDanmakuChange({ ...DEFAULT_DANMAKU_PREFERENCES })}>恢复弹幕默认设置</button>
         </div>}
         {tab === "account" && <div className="space-y-6"><DouyuAccountPanel /></div>}
@@ -60,7 +62,7 @@ export function SettingsPanel({ open, onClose, quality, onQualityChange, danmaku
     </div>
   </div>;
 }
-function Range({ label, value, min, max, suffix = "", onChange }: { label: string; value: number; min: number; max: number; suffix?: string; onChange: (value: number) => void }) {
-  return <label className="settings-range"><span>{label}<span>{value}{suffix}</span></span><input aria-label={label} type="range" value={value} min={min} max={max} onChange={(e) => onChange(Number(e.target.value))} /></label>;
+function Range({ label, value, min, max, suffix = "", displayValue, onChange }: { label: string; value: number; min: number; max: number; suffix?: string; displayValue?: string; onChange: (value: number) => void }) {
+  return <label className="settings-range"><span>{label}<span>{displayValue ?? `${value}${suffix}`}</span></span><input aria-label={label} aria-valuetext={displayValue ?? `${value}${suffix}`} type="range" value={value} min={min} max={max} onChange={(e) => onChange(Number(e.target.value))} /></label>;
 }
 function Shortcut({ keys, text }: { keys: string; text: string }) { return <div><span>{text}</span><kbd>{keys}</kbd></div>; }

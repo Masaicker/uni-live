@@ -10,14 +10,26 @@ import { getDouyuDanmakuColor, type DanmakuLayerHandle } from "./DanmakuLayer";
 
 type Connection = { close: () => void; addListener?: (name: string, listener: () => void) => void };
 
-export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean, layer: React.RefObject<DanmakuLayerHandle | null>) {
+function nonNegativeInteger(value: string | number | undefined): number | null {
+  if (!/^\d+$/.test(String(value ?? ""))) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean, layer: React.RefObject<DanmakuLayerHandle | null>, douyuMinLevel = 0) {
   const [status, setStatus] = useState<DanmakuStatus>("disabled");
+  const [nobles, setNobles] = useState<{ rid: string; count: number } | null>(null);
   const [retry, setRetry] = useState(0);
   const layerRef = useRef(layer);
   layerRef.current = layer;
+  const preferences = useRef({ enabled, douyuMinLevel });
+  preferences.current = { enabled, douyuMinLevel };
+  // Douyu broadcasts VIP counts on the same connection, even with danmaku hidden.
+  const needsConnection = platform === "douyu" || enabled;
   useEffect(() => {
+    setNobles(null);
     if (!isPlatformEnabled(platform) || platform === "direct" || platform === "unknown") { setStatus("unsupported"); return; }
-    if (!enabled) { setStatus("disabled"); return; }
+    if (!needsConnection) { setStatus("disabled"); return; }
     if (!rid) { setStatus("connecting"); return; }
     let disposed = false, attempt = 0;
     let connection: Connection | null = null;
@@ -25,9 +37,10 @@ export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean
     let timer: ReturnType<typeof setTimeout> | undefined;
     let connectTimer: ReturnType<typeof setTimeout> | undefined;
     const controller = new AbortController();
-    const push = (text: string, color?: string) => { if (!disposed && text) layerRef.current.current?.push(text, { color }); };
+    const push = (text: string, color?: string) => { if (!disposed && preferences.current.enabled && text) layerRef.current.current?.push(text, { color }); };
     const connect = async () => {
       if (disposed) return;
+      setNobles(null);
       setStatus("connecting");
       let finished = false;
       let connected = false;
@@ -38,6 +51,7 @@ export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean
         clearTimeout(connectTimer);
         stopCurrent();
         connection = null;
+        setNobles(null);
         setStatus("error");
         const delay = [1000, 3000, 10000][attempt++];
         if (delay !== undefined) timer = setTimeout(() => void connect(), delay);
@@ -46,11 +60,22 @@ export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean
       try {
         if (platform === "douyu") {
           const client = new DouyuDanmu(rid, (raw: string) => {
-            if (finished) return;
+            if (disposed || finished) return;
             // The client retains the binary packet header in the decoded text.
-            const data = deserialize(raw.slice(raw.indexOf("type@="))) as { type?: string; txt?: string; col?: string | number };
+            const start = raw.indexOf("type@=");
+            if (start < 0) return;
+            const data = deserialize(raw.slice(start)) as { type?: string; txt?: string; col?: string | number; vn?: string | number; level?: string | number };
             if (data.type === "loginres") ready();
-            if (data.type === "chatmsg" && data.txt) { ready(); push(data.txt, getDouyuDanmakuColor(data.col)); }
+            if (data.type === "oni") {
+              const count = nonNegativeInteger(data.vn);
+              if (count !== null) { ready(); setNobles((previous) => previous?.rid === rid && previous.count === count ? previous : { rid, count }); }
+            }
+            if (data.type === "chatmsg" && data.txt) {
+              ready();
+              const level = nonNegativeInteger(data.level);
+              // Missing levels cannot be classified as below the user's threshold.
+              if (level === null || level >= preferences.current.douyuMinLevel) push(data.txt, getDouyuDanmakuColor(data.col));
+            }
           }, fail);
           connection = client;
           stopCurrent = () => client.close();
@@ -88,6 +113,7 @@ export function useRoomDanmaku(platform: Platform, rid: string, enabled: boolean
     };
     void connect();
     return () => { disposed = true; controller.abort(); clearTimeout(timer); clearTimeout(connectTimer); connection?.close(); };
-  }, [platform, rid, enabled, retry]);
-  return { status, retry: () => setRetry((value) => value + 1) };
+  }, [platform, rid, needsConnection, retry]);
+  return { status: !enabled && status !== "unsupported" ? "disabled" : status, connectionStatus: status,
+    nobleCount: platform === "douyu" && nobles?.rid === rid ? nobles.count : null, retry: () => setRetry((value) => value + 1) };
 }

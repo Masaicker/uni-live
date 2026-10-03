@@ -157,13 +157,14 @@
   .monitor-tile.is-paused { border-color: #df9292; }
   .monitor-tile:fullscreen { position: fixed; inset: 0; border: 0; padding: 0; border-radius: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; }
   .tile-header { display: flex; align-items: center; position: absolute; top: 0; left: 0; right: 0; z-index: 7; gap: 7px; height: 38px; padding: 0 8px; background: linear-gradient(#111214d9, #11121480); cursor: grab; touch-action: none; user-select: none; opacity: 0; pointer-events: none; transition: opacity .14s; }
-  .monitor-tile:is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-paused, .is-touch-active) .tile-header,
-  .monitor-tile:is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-paused, .is-touch-active) .playback-controls { opacity: 1; pointer-events: auto; }
+  .monitor-tile:not(.is-idle):is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-paused, .is-touch-active) .tile-header,
+  .monitor-tile:not(.is-idle):is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-paused, .is-touch-active) .playback-controls { opacity: 1; pointer-events: auto; }
   .monitor-tile.is-thumbnail:not(:fullscreen) .tile-header { height: 26px; opacity: 1; background: linear-gradient(#111214e0, #111214c7); }
   .monitor-tile.is-thumbnail:not(:fullscreen) .tile-identity > span { color: #f1f3f6; text-shadow: 0 1px 2px #0008; }
   .monitor-tile.is-thumbnail:not(:fullscreen):not(:hover):not(:has(:focus-visible)):not(.is-room-hovered):not(.is-menu-open):not(.is-touch-active) .tile-controls { opacity: 0; pointer-events: none; }
-  .monitor-tile.is-fullscreen-idle, .monitor-tile.is-fullscreen-idle * { cursor: none; }
-  .monitor-tile.is-fullscreen-idle .tile-header, .monitor-tile.is-fullscreen-idle .playback-controls { opacity: 0; pointer-events: none; }
+  .monitor-tile.is-idle, .monitor-tile.is-idle * { cursor: none; }
+  .monitor-tile.is-idle .playback-controls, .monitor-tile.is-idle .tile-controls,
+  .monitor-tile.is-idle .resize-handle { opacity: 0; pointer-events: none; }
   .tile-header:active { cursor: grabbing; }
   .drag-mark { flex: none; color: #535b68; }
   .tile-identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
@@ -182,8 +183,8 @@
   .volume-popover { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); display: flex; justify-content: center; padding: 10px 9px 6px; border: 1px solid #434a54; border-radius: 7px; background: #191b1ef5; box-shadow: 0 4px 16px #0006; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .14s; }
   .playback-volume input { writing-mode: vertical-lr; direction: rtl; width: 16px; height: clamp(24px, calc(100cqh - 90px), 88px); margin: 0; cursor: pointer; }
   .playback-volume:hover .volume-popover, .playback-volume:focus-within .volume-popover { opacity: 1; visibility: visible; pointer-events: auto; }
-  .monitor-tile:has(.playback-volume:focus-within) .playback-controls { opacity: 1; pointer-events: auto; }
-  .monitor-tile:has(.playback-controls[data-seeking]) .playback-controls { opacity: 1; pointer-events: auto; }
+  .monitor-tile:not(.is-idle):has(.playback-volume:focus-within) .playback-controls { opacity: 1; pointer-events: auto; }
+  .monitor-tile:not(.is-idle):has(.playback-controls[data-seeking]) .playback-controls { opacity: 1; pointer-events: auto; }
   .playback-seek-wrap { position: relative; height: 14px; margin: 0 0 4px; }
   .playback-seek-track { --available-start: 100%; --played: 100%; --buffered: 100%; position: absolute; left: 5px; right: 5px; top: 6px; height: 3px; border-radius: 2px; pointer-events: none; background: linear-gradient(to right, #30363f 0 var(--available-start), #8299c0 var(--available-start) var(--played), #667487 var(--played) var(--buffered), #30363f var(--buffered) 100%); }
   .playback-cursor { position: absolute; inset: 0; transform: translateX(100%); will-change: transform; }
@@ -202,6 +203,8 @@
   .playback-time { color: #989fa9; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .playback-details { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 1; min-width: 0; color: #a5adb9; font-size: 10px; }
   .playback-quality { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .playback-nobles, .actual-resolution { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .playback-nobles { display: inline-flex; align-items: center; gap: 4px; color: #e5bf83; }
   .danmaku-item { z-index: 1; user-select: none; }
   .danmaku-overlay { pointer-events: none; position: absolute; inset: 0; z-index: 4; overflow: hidden; }
   .tile-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; padding: 12px; text-align: center; font-size: 12px; color: #7c848f; }
@@ -226,7 +229,7 @@
   .tile-menu p { font-size: 11px; line-height: 1.7; padding: 6px; }
   .tile-menu.floating-menu { position: fixed; z-index: 80; width: 244px; max-width: calc(100vw - 24px); right: auto; }
   .resize-handle { position: absolute; z-index: 8; border: 0; background: transparent; opacity: 0; touch-action: none; }
-  .monitor-tile:hover .resize-handle { opacity: 1; }
+  .monitor-tile:not(.is-idle):hover .resize-handle { opacity: 1; }
   .resize-n, .resize-s { height: 6px; left: 18px; right: 18px; cursor: ns-resize; }
   .resize-n { top: 0; } .resize-s { bottom: 0; }
   .resize-w, .resize-e { width: 6px; top: 18px; bottom: 18px; cursor: ew-resize; }
@@ -333,7 +336,7 @@
   .tile-identity { min-width: 36px; }
   .drag-mark { display: none; }
   .tile-controls { position: absolute; top: 31px; right: 3px; z-index: 7; border: 1px solid #34383f; border-radius: 5px; background: #191b1ef5; opacity: 0; transition: opacity .12s; }
-  .monitor-tile:is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-touch-active) .tile-controls { opacity: 1; pointer-events: auto; }
+  .monitor-tile:not(.is-idle):is(:hover, :has(:focus-visible), .is-room-hovered, .is-menu-open, .is-touch-active) .tile-controls { opacity: 1; pointer-events: auto; }
   .tile-controls .icon-button { height: 24px; width: 24px; }
   .playback-time { font-size: 9px; }
   .is-thumbnail:not(:fullscreen) .playback-seek-wrap, .is-thumbnail:not(:fullscreen) .playback-time, .is-thumbnail:not(:fullscreen) .playback-live, .is-thumbnail:not(:fullscreen) .playback-details { display: none; }

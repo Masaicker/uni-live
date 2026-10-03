@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChatCircleText, CornersOut, CornersIn, X, DotsThree, ArrowsClockwise, Copy, ArrowSquareOut, WarningCircle, DotsSixVertical } from "@phosphor-icons/react";
+import { ChatCircleText, CornersOut, CornersIn, X, DotsThree, ArrowsClockwise, Copy, ArrowSquareOut, WarningCircle, DotsSixVertical, User } from "@phosphor-icons/react";
 import type { IQnType, MonitorVideo } from "@/types";
 import type { ResizeHandle } from "@/features/free-layout/layout-utils";
 import { PlayerAdapter } from "@/features/video/PlayerAdapter";
@@ -65,8 +65,8 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const [dimensions, setDimensions] = useState("");
   const playbackControls = useRef<PlaybackControlsHandle>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [fullscreenIdle, setFullscreenIdle] = useState(false);
-  const wakeFullscreen = useRef<() => void>(() => {});
+  const [idle, setIdle] = useState(false);
+  const wakeControls = useRef<() => void>(() => {});
   const [touchActive, setTouchActive] = useState(false);
   const [controlError, setControlError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -82,7 +82,9 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const root = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const layer = useRef<DanmakuLayerHandle>(null);
-  const comments = useRoomDanmaku(video.platform, video.rid, video.danmakuEnabled, layer);
+  const comments = useRoomDanmaku(video.platform, video.rid, video.danmakuEnabled, layer, props.danmaku.douyuMinLevel);
+  const nobleCount = comments.nobleCount;
+  const nobleLabel = nobleCount === null ? "—" : nobleCount.toLocaleString("en-US");
   const audible = !video.muted && video.volume > 0 && !video.paused && video.status === "playing";
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
   const mediaOptions = timelineOptions(video.stream, video.platform);
@@ -112,38 +114,75 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
 
   useEffect(() => {
     const node = root.current;
-    setFullscreenIdle(false);
-    if (!fullscreen || !node || video.paused || menu || video.status === "error") return;
-    let timer: ReturnType<typeof setTimeout>;
+    setIdle(false);
+    if (!node || props.hovered || video.paused || menu || video.status === "error" || touchActive) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let inside = node.matches(":hover");
     let pressed = false;
+    let disposed = false;
     const wake = () => {
-      setFullscreenIdle(false);
+      if (disposed) return;
+      setIdle(false);
       clearTimeout(timer);
+      if (!inside || pressed || document.hidden) return;
       timer = setTimeout(() => {
-        if (!pressed && !node.matches(":has(:focus-visible)")) setFullscreenIdle(true);
+        if (inside && !pressed && !document.hidden
+          && !node.matches(":has(:focus-visible), :has(.playback-volume:focus-within), :has(.playback-controls[data-seeking])")) setIdle(true);
       }, 3000);
     };
-    const down = () => { pressed = true; wake(); };
-    wakeFullscreen.current = wake;
-    const up = () => { pressed = false; wake(); };
-    node.addEventListener("pointermove", wake);
-    node.addEventListener("pointerdown", down);
+    const move = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      inside = true;
+      wake();
+    };
+    const leave = () => { inside = false; wake(); };
+    const down = (event: PointerEvent) => {
+      pressed = true;
+      inside = event.pointerType !== "touch";
+      wake();
+    };
+    wakeControls.current = wake;
+    const up = (event: PointerEvent) => {
+      if (!pressed) return;
+      pressed = false;
+      inside = event.pointerType !== "touch" && node.contains(document.elementFromPoint(event.clientX, event.clientY));
+      wake();
+    };
+    const focus = () => queueMicrotask(wake);
+    const clear = () => { pressed = false; inside = false; wake(); };
+    const resume = () => { inside = node.matches(":hover"); wake(); };
+    const visibility = () => { if (document.hidden) clear(); else resume(); };
+    node.addEventListener("pointerenter", move);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerleave", leave);
+    node.addEventListener("pointerdown", down, true);
     document.addEventListener("pointerup", up);
-    document.addEventListener("pointercancel", up);
+    document.addEventListener("pointercancel", clear);
     node.addEventListener("keydown", wake);
-    node.addEventListener("focusout", wake);
+    node.addEventListener("focusin", focus);
+    node.addEventListener("focusout", focus);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("blur", clear);
+    window.addEventListener("focus", resume);
     wake();
     return () => {
-      wakeFullscreen.current = () => {};
+      disposed = true;
+      wakeControls.current = () => {};
       clearTimeout(timer);
-      node.removeEventListener("pointermove", wake);
-      node.removeEventListener("pointerdown", down);
+      node.removeEventListener("pointerenter", move);
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerleave", leave);
+      node.removeEventListener("pointerdown", down, true);
       document.removeEventListener("pointerup", up);
-      document.removeEventListener("pointercancel", up);
+      document.removeEventListener("pointercancel", clear);
       node.removeEventListener("keydown", wake);
-      node.removeEventListener("focusout", wake);
+      node.removeEventListener("focusin", focus);
+      node.removeEventListener("focusout", focus);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("blur", clear);
+      window.removeEventListener("focus", resume);
     };
-  }, [fullscreen, video.paused, video.status, menu]);
+  }, [fullscreen, props.focused, props.thumbnail, props.hovered, video.paused, video.status, menu, touchActive]);
 
   useEffect(() => {
     if (!menu) return;
@@ -199,7 +238,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   useImperativeHandle(ref, () => ({
     key: (key) => {
       const value = latest.current;
-      wakeFullscreen.current();
+      wakeControls.current();
       if (key === " ") {
         setPaused(!value.video.paused);
         showFeedback(value.video.paused ? "播放" : "暂停");
@@ -216,7 +255,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       }
       return true;
     },
-    finishSeek: (commit) => playbackControls.current?.finishSeek(commit),
+    finishSeek: (commit) => { playbackControls.current?.finishSeek(commit); wakeControls.current(); },
   }), [setPaused]);
 
   const secondaryControls = <>
@@ -231,8 +270,8 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
     </IconButton>
   </>;
 
-  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${compact ? "is-compact-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${fullscreenIdle ? "is-fullscreen-idle" : ""}`}
-    aria-label={roomLabel(video)} data-room-id={video.id} data-platform={video.platform} data-muted={video.muted} data-audible={audible} data-focused={props.focused} data-playback-key={video.playbackKey} data-danmaku-status={comments.status}
+  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${compact ? "is-compact-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${idle ? "is-idle" : ""}`}
+    aria-label={roomLabel(video)} data-room-id={video.id} data-platform={video.platform} data-muted={video.muted} data-audible={audible} data-focused={props.focused} data-room-idle={idle} data-playback-key={video.playbackKey} data-danmaku-status={comments.status}
     onPointerDownCapture={intercept} onClickCapture={intercept}
     onPointerDown={(event) => { if (event.pointerType === "touch") setTouchActive(true); }}
     onPointerLeave={() => setTouchActive(false)}
@@ -264,7 +303,9 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
         onReplayExpired={() => showFeedback("较早的缓存已过期，已移到最早可播位置")}
         onDimensions={(w, h) => setDimensions(w && h ? `${w} × ${h}` : "")} />}
       {video.stream && <PlaybackControls ref={playbackControls} key={video.playbackKey} mediaRef={media} paused={video.paused} muted={video.muted} volume={video.volume} fullscreen={fullscreen}
-        info={<><span className="playback-quality" title={`${actualQuality}${dimensions ? ` · ${dimensions}` : ""}`}>{actualQuality}{dimensions && <span className="actual-resolution"> · {dimensions}</span>}</span>{video.warning && <span title={video.warning} className="quality-warning"><WarningCircle size={14} /></span>}</>}
+        info={<>{video.platform === "douyu" && <span className="playback-nobles" aria-label={nobleCount === null ? "当前贵宾人数暂不可用" : `当前贵宾：${nobleCount} 人`} title={nobleCount === null ? comments.connectionStatus === "error" ? "贵宾数据连接中断，可在更多操作中重试" : "正在获取当前贵宾人数" : `当前贵宾：${nobleCount} 人`}><User size={13} weight="fill" aria-hidden />{nobleLabel}</span>}
+          <span className="playback-quality" title={actualQuality}>{actualQuality}</span>
+          {dimensions && <span className="actual-resolution">· {dimensions}</span>}{video.warning && <span title={video.warning} className="quality-warning"><WarningCircle size={14} /></span>}</>}
         onTogglePaused={() => setPaused(!video.paused)} onMute={props.onMute} onAudio={props.onAudio}
         onSeek={(time, follow = false) => {
           const player = media.current;
@@ -304,7 +345,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       <a href={video.url} target="_blank" rel="noreferrer"><ArrowSquareOut size={16} />打开原始直播间</a>
       {copyStatus && <p role="status">{copyStatus}</p>}
       {video.warning && <p className="text-warning">{video.warning}</p>}
-      {comments.status === "error" && <button onClick={comments.retry}><ChatCircleText size={16} />重试弹幕连接</button>}
+      {comments.connectionStatus === "error" && <button onClick={comments.retry}><ChatCircleText size={16} />{video.platform === "douyu" ? "重试贵宾与弹幕连接" : "重试弹幕连接"}</button>}
     </div>, fullscreen && root.current ? root.current : document.body)}
     {!fullscreen && !props.focused && !props.thumbnail && (Object.entries(handles) as [ResizeHandle, string][]).map(([handle, className]) => <button key={handle} className={`resize-handle ${className}`} aria-label={`调整大小 ${handle}`} title="拖动调整大小" onPointerDown={(event) => props.onResize(event, handle)} />)}
   </section>;

@@ -65,7 +65,7 @@ export function LiveRoomClient(share: LegacyShare) {
   const initialShare = useRef(share);
   const streamType = useRef<ReturnType<typeof detectStreamType>>("flv");
   const workspace = useRef<HTMLDivElement>(null);
-  const hoveredId = useRoomHover(workspace, `${libraryView}:${collapsed}:${drawer}:${settings}`);
+  const { hoveredId, sidebarHoveredId } = useRoomHover(workspace, `${libraryView}:${collapsed}:${drawer}:${settings}`);
   const controlRef = useRoomKeyboard({ videos: state.videos, focusedId: state.focus?.id ?? null, fullscreenId: state.fullscreen?.id ?? null, blocked: settings });
 
   const dismissUndo = useCallback(() => { clearTimeout(undoTimer.current); setClosedRooms(null); setUnfollowedRoom(null); }, []);
@@ -94,7 +94,7 @@ export function LiveRoomClient(share: LegacyShare) {
         const value = raw === null || raw === undefined ? fallback : Number(raw);
         return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
       };
-      setDanmaku({ opacity: bounded("opacity", DEFAULT_DANMAKU_PREFERENCES.opacity, 0, 100), density: bounded("density", DEFAULT_DANMAKU_PREFERENCES.density, 0, 300), speed: bounded("speed", DEFAULT_DANMAKU_PREFERENCES.speed, 40, 400), fontSize: bounded("fontSize", DEFAULT_DANMAKU_PREFERENCES.fontSize, 12, 40), thumbnailFontSize: bounded("thumbnailFontSize", DEFAULT_DANMAKU_PREFERENCES.thumbnailFontSize, 10, 24) });
+      setDanmaku({ opacity: bounded("opacity", DEFAULT_DANMAKU_PREFERENCES.opacity, 0, 100), density: bounded("density", DEFAULT_DANMAKU_PREFERENCES.density, 0, 300), speed: bounded("speed", DEFAULT_DANMAKU_PREFERENCES.speed, 40, 400), fontSize: bounded("fontSize", DEFAULT_DANMAKU_PREFERENCES.fontSize, 12, 40), thumbnailFontSize: bounded("thumbnailFontSize", DEFAULT_DANMAKU_PREFERENCES.thumbnailFontSize, 10, 24), douyuMinLevel: Math.round(bounded("douyuMinLevel", DEFAULT_DANMAKU_PREFERENCES.douyuMinLevel, 0, 200)) });
     } catch { notify("本地设置读取失败，仍可添加直播间"); }
     setReady(true);
     const media = window.matchMedia("(max-width: 767px)");
@@ -480,7 +480,7 @@ export function LiveRoomClient(share: LegacyShare) {
         onKeyDown={(event) => {
           if (event.key.toLowerCase() === "r" && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !settings && !(event.target as HTMLElement).closest("input, textarea, select, [contenteditable], [role='dialog'], [role='menu']")) { event.preventDefault(); arrange(); }
         }}>
-        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} hoveredId={hoveredId} onControlRef={controlRef} size={size} danmaku={danmaku}
+        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} hoveredId={sidebarHoveredId} onControlRef={controlRef} size={size} danmaku={danmaku}
           onFullscreenChange={(id, active) => send({ type: "fullscreen", id, active, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })}
           onLayout={(id, layout) => send({ type: "layout", id, layout })} onRaise={(id) => send({ type: "raise", id })} onFocus={(id) => send({ type: "focus", id, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })} onMute={toggleMute}
           onAudio={(id, muted, volume) => send({ type: "audio", id, muted, volume })} onClose={stopWatching} onRefresh={refresh}

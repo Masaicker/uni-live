@@ -6,36 +6,44 @@ const objects = ".monitor-tile[data-room-id], [data-library-room]";
 const blocked = "[role='dialog'], [role='menu'], [data-sorting='true']";
 
 export function useRoomHover(workspace: RefObject<HTMLDivElement | null>, viewKey: string) {
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ hoveredId: string | null; sidebarHoveredId: string | null }>({ hoveredId: null, sidebarHoveredId: null });
   useEffect(() => {
     const root = workspace.current;
     if (!root) return;
     let pressed = false;
     let source: HTMLElement | null = null;
-    setHoveredId(null);
+    const publish = () => {
+      const sidebarHoveredId = source?.dataset.libraryRoom ?? null;
+      const hoveredId = source?.dataset.roomIdle === "true" ? null : source?.dataset.roomId ?? sidebarHoveredId;
+      setHover((previous) => previous.hoveredId === hoveredId && previous.sidebarHoveredId === sidebarHoveredId
+        ? previous : { hoveredId, sidebarHoveredId });
+    };
+    publish();
     const locate = (node: EventTarget | null) => {
       const element = node instanceof Element ? node : null;
       const object = element?.closest<HTMLElement>(objects);
       source = !document.hidden && object && root.contains(object) && !element?.closest(blocked)
         && !root.querySelector(blocked) ? object : null;
-      setHoveredId(source?.dataset.roomId ?? source?.dataset.libraryRoom ?? null);
+      publish();
     };
     const over = (event: PointerEvent) => { if (!pressed && event.pointerType !== "touch") locate(event.target); };
-    const out = (event: PointerEvent) => { if (!pressed) locate(event.relatedTarget); };
+    const out = (event: PointerEvent) => { if (!pressed && event.pointerType !== "touch") locate(event.relatedTarget); };
     const down = (event: PointerEvent) => {
       pressed = true;
-      if ((event.target as Element)?.closest(".tile-header, .resize-handle, [data-sort-handle]")) { source = null; setHoveredId(null); }
+      if ((event.target as Element)?.closest(".tile-header, .resize-handle, [data-sort-handle]")) { source = null; publish(); }
     };
-    const up = (event: PointerEvent) => { pressed = false; locate(document.elementFromPoint(event.clientX, event.clientY)); };
-    const clear = () => { pressed = false; source = null; setHoveredId(null); };
+    const up = (event: PointerEvent) => { pressed = false; locate(event.pointerType === "touch" ? null : document.elementFromPoint(event.clientX, event.clientY)); };
+    const clear = () => { pressed = false; source = null; publish(); };
     const observer = new MutationObserver((records) => {
       // Media frames and danmaku also mutate this subtree; only source removal or
-      // entering sort mode invalidates the hint, without scanning every room.
+      // entering sort mode invalidates the source. Idle changes only update its hint.
       if (source && (!source.isConnected || records.some((record) => record.attributeName === "data-sorting" && (record.target as HTMLElement).dataset.sorting === "true"))) {
-        source = null; setHoveredId(null);
+        source = null; publish();
+      } else if (source && records.some((record) => record.target === source && record.attributeName === "data-room-idle")) {
+        publish();
       }
     });
-    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-sorting"] });
+    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-sorting", "data-room-idle"] });
     root.addEventListener("pointerover", over);
     root.addEventListener("pointerout", out);
     root.addEventListener("pointerdown", down, true);
@@ -54,5 +62,5 @@ export function useRoomHover(workspace: RefObject<HTMLDivElement | null>, viewKe
       window.removeEventListener("blur", clear);
     };
   }, [workspace, viewKey]);
-  return hoveredId;
+  return hover;
 }

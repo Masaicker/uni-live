@@ -62,7 +62,7 @@ export const PlaybackControls = forwardRef<PlaybackControlsHandle, Props>(functi
     if (!tile) return;
     let frame = 0, lastFrame = 0, lastText = 0, lastFill = 0, labelKey = "", edge = 0, live = true;
     let labelLive = true, labelAvailable = false, seekVisible = false;
-    const visible = () => !document.hidden && !tile.classList.contains("is-fullscreen-idle")
+    const visible = () => !document.hidden && !tile.classList.contains("is-idle")
       && seekVisible
       && (Boolean(frozen.current) || tile.matches(":hover, :has(:focus-visible), :has(.playback-volume:focus-within), .is-room-hovered, .is-menu-open, .is-paused, .is-touch-active"));
     const snapshot = () => ({ ...actual.current, current: preview.current ?? latest.current.mediaRef.current?.currentTime ?? actual.current.current });
