@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, Check, ArrowUp, ArrowDown, XSquare } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, XSquare } from "@phosphor-icons/react";
 import type { FollowedRoom, MonitorVideo } from "@/types";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { isPlatformEnabled } from "@/lib/platform-support";
@@ -45,10 +45,14 @@ export function RoomSidebar(props: Props) {
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
   const [avatarMenu, setAvatarMenu] = useState<{ id: string; left: number; top: number } | null>(null);
+  const [compactTools, setCompactTools] = useState(false);
+  const [toolsMenu, setToolsMenu] = useState<{ left: number; top: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement | null>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const toolsButtonRef = useRef<HTMLButtonElement>(null);
   const followed = followedRooms(props.rooms, !editing);
   const liveCount = followed.filter((room) => room.liveStatus === true).length;
   const history = watchingHistory(props.rooms);
@@ -59,7 +63,32 @@ export function RoomSidebar(props: Props) {
   const selected = props.rooms.find((room) => room.id === avatarMenu?.id);
   const draggedRoom = props.rooms.find((room) => room.id === dragged);
 
-  useEffect(() => { setAvatarMenu(null); setEditing(false); }, [tab, props.view, props.collapsed]);
+  useEffect(() => { setAvatarMenu(null); setToolsMenu(null); setEditing(false); }, [tab, props.view, props.collapsed]);
+  useEffect(() => {
+    const height = window.matchMedia("(max-height: 640px)");
+    const update = () => { setCompactTools(height.matches); setToolsMenu(null); };
+    update();
+    height.addEventListener("change", update);
+    return () => height.removeEventListener("change", update);
+  }, []);
+  useLayoutEffect(() => {
+    if (!toolsMenu || !toolsMenuRef.current) return;
+    const bounds = toolsMenuRef.current.getBoundingClientRect();
+    const left = Math.max(12, Math.min(toolsMenu.left, window.innerWidth - bounds.width - 12));
+    const top = Math.max(12, Math.min(toolsMenu.top, window.innerHeight - bounds.height - 12));
+    if (left !== toolsMenu.left || top !== toolsMenu.top) setToolsMenu({ left, top });
+  }, [toolsMenu]);
+  useEffect(() => {
+    if (!toolsMenu) return;
+    const outside = (event: PointerEvent) => { if (!toolsMenuRef.current?.contains(event.target as Node) && !toolsButtonRef.current?.contains(event.target as Node)) setToolsMenu(null); };
+    const resize = () => setToolsMenu(null);
+    const scroll = (event: Event) => { if (!toolsMenuRef.current?.contains(event.target as Node)) setToolsMenu(null); };
+    document.addEventListener("pointerdown", outside, true);
+    window.addEventListener("resize", resize);
+    document.addEventListener("scroll", scroll, true);
+    toolsMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    return () => { document.removeEventListener("pointerdown", outside, true); window.removeEventListener("resize", resize); document.removeEventListener("scroll", scroll, true); };
+  }, [toolsMenu]);
   useLayoutEffect(() => {
     if (!avatarMenu || !menuRef.current) return;
     const bounds = menuRef.current.getBoundingClientRect();
@@ -87,6 +116,7 @@ export function RoomSidebar(props: Props) {
   };
   const openAvatarMenu = (button: HTMLButtonElement, room: FollowedRoom) => {
     if (editing) return;
+    setToolsMenu(null);
     if (avatarMenu?.id === room.id) { setAvatarMenu(null); return; }
     const rect = button.getBoundingClientRect();
     menuButton.current = button;
@@ -99,14 +129,18 @@ export function RoomSidebar(props: Props) {
     const next = visible[index + (["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1)];
     if (next) props.onReorder(room.id, next.id);
   };
-  const tools = <>
-    <IconButton label="刷新全部直播间" disabled={props.refreshingAll || !props.rooms.some((room) => isPlatformEnabled(room.platform))} onClick={props.onRefreshAll}><ArrowsClockwise size={18} className={props.refreshingAll ? "animate-spin" : ""} /></IconButton>
-    <IconButton label="整理全部" onClick={props.onArrange}><SquaresFour size={18} /></IconButton>
-    <IconButton label="全部静音" onClick={props.onMuteAll}><SpeakerSlash size={18} /></IconButton>
-    <IconButton label="清理临时房间并整理" disabled={!props.videos.some((video) => !video.followed)} onClick={props.onClean}><Broom size={18} /></IconButton>
+  const secondaryTools = [
+    { label: "刷新全部直播间", Icon: ArrowsClockwise, disabled: props.refreshingAll || !props.rooms.some((room) => isPlatformEnabled(room.platform)), onClick: props.onRefreshAll, spinning: props.refreshingAll },
+    { label: "整理全部", Icon: SquaresFour, onClick: props.onArrange },
+    { label: "全部静音", Icon: SpeakerSlash, onClick: props.onMuteAll },
+    { label: "清理临时房间并整理", Icon: Broom, disabled: !props.videos.some((video) => !video.followed), onClick: props.onClean },
+  ];
+  const toolButtons = secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <IconButton key={label} label={label} disabled={disabled} onClick={onClick}><Icon size={18} className={spinning ? "animate-spin" : ""} /></IconButton>);
+  const persistentTools = <>
     <IconButton label="关闭全部画面" disabled={!props.videos.length} onClick={props.onCloseAll} className="bulk-close-button"><XSquare size={18} /></IconButton>
     <IconButton label="设置" onClick={props.onSettings}><GearSix size={18} /></IconButton>
   </>;
+  const tools = <>{toolButtons}{persistentTools}</>;
   const sidebar = props.collapsed ? <aside className="sidebar-rail" aria-label="直播工具栏">
     <IconButton label="展开房间列表" onClick={() => props.onCollapse(false)}><CaretRight size={18} /></IconButton>
     <span className="rail-live-count" title={`${liveCount} 个关注正在直播`} aria-label={`${liveCount} 个关注正在直播`}><span className={`status-dot ${liveCount > 0 ? "is-live" : ""}`} />{liveCount}</span>
@@ -114,7 +148,12 @@ export function RoomSidebar(props: Props) {
       <RoomAvatarButton room={room} watching={props.videos.some((video) => video.id === room.id)} menuOpen={avatarMenu?.id === room.id} status="直播中" onToggle={() => toggleAvatarRoom(room.id)} onMenu={(button) => openAvatarMenu(button, room)} />
     </div>)}</div>
     {props.focused && <IconButton label="退出聚焦" onClick={props.onExitFocus}><CornersIn size={18} /></IconButton>}
-    {tools}
+    {compactTools ? <button ref={toolsButtonRef} type="button" className={`icon-button ${toolsMenu ? "is-active" : ""}`} aria-label="更多操作" title="更多操作" aria-haspopup="menu" aria-expanded={Boolean(toolsMenu)} onClick={() => {
+      setAvatarMenu(null);
+      const rect = toolsButtonRef.current!.getBoundingClientRect();
+      setToolsMenu(toolsMenu ? null : { left: rect.right + 8, top: rect.top });
+    }}><DotsThree size={18} /></button> : toolButtons}
+    {persistentTools}
   </aside> : <aside className="room-sidebar" aria-label="房间列表">
     <header className="sidebar-header"><div className="brand-mark"><SquaresFour size={20} /><span>多看</span></div><IconButton label="收起房间列表" onClick={() => props.onCollapse(true)}><CaretLeft size={18} /></IconButton></header>
     <div className="sidebar-inputs">
@@ -167,7 +206,18 @@ export function RoomSidebar(props: Props) {
     {editing && <span className="sr-only" role="status">{draggedRoom ? `正在拖动${roomLabel(draggedRoom)}${dropTarget ? "，松开可放到标记位置" : ""}` : "排序模式已开启"}</span>}
     <footer className="sidebar-footer">{props.focused && <button className="sidebar-exit-focus" onClick={props.onExitFocus}><CornersIn size={15} />退出聚焦<span>Esc</span></button>}<div className="flex items-center justify-between">{tools}</div></footer>
   </aside>;
-  return <>{sidebar}{avatarMenu && selected && createPortal(<div ref={menuRef} className="room-avatar-menu" role="menu" aria-label={`${roomLabel(selected)}房间操作`} style={{ left: avatarMenu.left, top: avatarMenu.top }} onKeyDown={(event) => {
+  return <>{sidebar}{props.collapsed && compactTools && toolsMenu && createPortal(<div ref={toolsMenuRef} className="room-avatar-menu sidebar-tools-menu" role="menu" aria-label="全局操作" style={{ left: toolsMenu.left, top: toolsMenu.top }} onKeyDown={(event) => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setToolsMenu(null); toolsButtonRef.current?.focus(); }
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        event.preventDefault();
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+      }
+      if (event.key === "Tab") { setToolsMenu(null); toolsButtonRef.current?.focus(); }
+    }}>
+      {secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <button key={label} type="button" role="menuitem" disabled={disabled} onClick={() => { setToolsMenu(null); toolsButtonRef.current?.focus(); onClick(); }}><Icon size={18} className={spinning ? "animate-spin" : ""} /><span>{label}</span></button>)}
+    </div>, document.body)}{avatarMenu && selected && createPortal(<div ref={menuRef} className="room-avatar-menu" role="menu" aria-label={`${roomLabel(selected)}房间操作`} style={{ left: avatarMenu.left, top: avatarMenu.top }} onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); setAvatarMenu(null); menuButton.current?.focus(); }
       if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")], index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : buttons.length - 1)) % buttons.length]?.focus(); }
     }}>
