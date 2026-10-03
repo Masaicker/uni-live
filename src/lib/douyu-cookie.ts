@@ -16,6 +16,19 @@ export function normalizeDouyuCookie(input: string): string {
   return cookie;
 }
 
+export function normalizeDouyuLoginCookie(input: string): string {
+  const cookie = normalizeDouyuCookie(input);
+  if (!cookie) throw new Error("请先粘贴完整 Cookie");
+  const parts = cookie.split(";").map((part) => part.trim());
+  const values = (name: string) => parts.filter((part) => part.startsWith(`${name}=`)).map((part) => part.slice(name.length + 1));
+  const uid = values("acf_uid"), auth = values("acf_auth");
+  if (uid.length > 1 || auth.length > 1) throw new Error("Cookie 登录信息重复，请重新复制完整 Cookie");
+  if (!uid[0] || !/^\d+$/.test(uid[0]) || Number(uid[0]) <= 0 || !auth[0]) {
+    throw new Error("Cookie 缺少有效登录信息，请登录斗鱼后重新复制");
+  }
+  return cookie;
+}
+
 export function readDouyuCookie(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(STORAGE_KEY) ?? "";

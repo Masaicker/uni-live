@@ -394,7 +394,7 @@ export function LiveRoomClient(share: LegacyShare) {
     if (refreshAllActive.current) return;
     refreshAllActive.current = true;
     setRefreshingAll(true);
-    const queue = current.current.rooms.filter((room) => isPlatformEnabled(room.platform) && (room.followed || current.current.videos.some((video) => video.id === room.id))).map((room) => room.id);
+    const queue = current.current.rooms.filter((room) => isPlatformEnabled(room.platform)).map((room) => room.id);
     const worker = async () => {
       while (refreshAllActive.current && queue.length) {
         const id = queue.shift()!;

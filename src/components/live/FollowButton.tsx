@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Minus, Star } from "@phosphor-icons/react";
 
-const HOLD_MS = 750;
+const HOLD_MS = 1250;
 
 export function FollowButton({ followed, onChange, size = 17, menuItem = false }: {
   followed: boolean; onChange: (followed: boolean) => void; size?: number; menuItem?: boolean;
@@ -57,7 +57,7 @@ export function FollowButton({ followed, onChange, size = 17, menuItem = false }
   useEffect(() => () => clearTimeout(timer.current), []);
   const label = followed ? "长按取消关注" : "关注房间";
   return <button ref={button} type="button" role={menuItem ? "menuitem" : undefined} aria-label={label}
-    title={followed ? "长按 0.75 秒取消关注，松开可中止" : label} aria-pressed={menuItem ? undefined : followed}
+    title={followed ? "长按 1.25 秒取消关注，松开可中止" : label} aria-pressed={menuItem ? undefined : followed}
     className={`icon-button follow-button ${followed ? "is-active" : ""} ${holding ? "is-holding" : ""}`}
     onPointerDown={(event) => {
       event.stopPropagation();

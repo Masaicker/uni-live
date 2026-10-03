@@ -6,6 +6,7 @@ const ts = require("typescript");
 const root = path.resolve(__dirname, "..");
 const resolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...args) {
+  if (request === "server-only") request = "next/dist/compiled/server-only/empty";
   return resolve.call(this, request.startsWith("@/") ? path.join(root, "src", request.slice(2)) : request, ...args);
 };
 for (const extension of [".ts", ".tsx"]) {
