@@ -7,6 +7,7 @@ import { emptyTimeline, LIVE_REPLAY_SECONDS, readMediaTimeline } from "./media-t
 import { createFlvHttpLoader } from "./flv-http-loader";
 import { LiveBufferWatchdog, supportsPlaybackWorker } from "./live-buffer-watchdog";
 import { bindLiveReplayWindow, bufferedLiveEdge, restoreReplayPosition } from "./live-replay-window";
+import { bindLiveVisibilityResume } from "./live-visibility-resume";
 
 export default function FlvPlayer(props: PlayerAdapterProps) {
   const element = useRef<HTMLVideoElement>(null);
@@ -25,6 +26,7 @@ export default function FlvPlayer(props: PlayerAdapterProps) {
     let failed = false;
     let timer: ReturnType<typeof setInterval> | undefined;
     let bufferWindow: ReturnType<typeof bindLiveReplayWindow> | undefined;
+    let disposeResume: (() => void) | undefined;
     const fail = (message: string) => {
       if (disposed || failed) return;
       failed = true;
@@ -32,6 +34,7 @@ export default function FlvPlayer(props: PlayerAdapterProps) {
         if (disposed) return;
         clearInterval(timer);
         bufferWindow?.dispose();
+        disposeResume?.();
         engine.current?.destroy(); engine.current = null;
         latest.current.onError?.(message);
       });
@@ -59,6 +62,7 @@ export default function FlvPlayer(props: PlayerAdapterProps) {
       });
       player.attachMediaElement(video);
       bufferWindow = bindLiveReplayWindow(player, video, () => { if (started.current) latest.current.onReplayExpired?.(); });
+      disposeResume = bindLiveVisibilityResume(video, () => latest.current, play);
       let complete = false;
       const monitor = new LiveBufferWatchdog(performance.now());
       player.on(flv.Events.LOADING_COMPLETE, () => { complete = true; });
@@ -80,6 +84,7 @@ export default function FlvPlayer(props: PlayerAdapterProps) {
       failure.current = undefined;
       clearInterval(timer);
       bufferWindow?.dispose();
+      disposeResume?.();
       engine.current?.destroy(); engine.current = null;
       if (mediaRef?.current === video) mediaRef.current = null;
     };

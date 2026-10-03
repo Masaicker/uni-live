@@ -13,6 +13,7 @@ export interface PlayerAdapterProps {
   muted?: boolean;
   volume?: number;
   paused?: boolean;
+  followingLive?: boolean;
   mediaRef?: React.RefObject<HTMLVideoElement | null>;
   onError?: (message: string) => void;
   onAudioChange?: (muted: boolean, volume: number) => void;
@@ -25,7 +26,7 @@ export interface PlayerAdapterProps {
   timelineOptions?: TimelineOptions;
 }
 
-export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, paused = false, mediaRef, onError, onAudioChange, onPlay, onReady, onPause, onDimensions, onReplayExpired, onTimeline, timelineOptions }: PlayerAdapterProps) {
+export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, paused = false, followingLive = true, mediaRef, onError, onAudioChange, onPlay, onReady, onPause, onDimensions, onReplayExpired, onTimeline, timelineOptions }: PlayerAdapterProps) {
   const started = useRef<number | null>(null);
   const hls = useRef<{ src: string; key: number; engine: { levels?: { details?: { live: boolean } }[] } | null } | null>(null);
   const desiredAudio = useRef({ muted, volume });
@@ -44,7 +45,7 @@ export function PlayerAdapter({ src, playbackKey, muted = true, volume = 0.5, pa
 
   if (!src) return null;
   if (isFlvSource(src)) return <div className="player-adapter absolute inset-0"><FlvPlayer key={`${src}:${playbackKey}`} src={src} playbackKey={playbackKey}
-    muted={muted} volume={volume} paused={paused} mediaRef={mediaRef} onError={onError} onAudioChange={onAudioChange}
+    muted={muted} volume={volume} paused={paused} followingLive={followingLive} mediaRef={mediaRef} onError={onError} onAudioChange={onAudioChange}
     onPlay={onPlay} onReady={onReady} onPause={onPause} onDimensions={onDimensions} onReplayExpired={onReplayExpired} onTimeline={onTimeline} timelineOptions={timelineOptions} /></div>;
   return <div className="player-adapter absolute inset-0">
     <ReactPlayer key={playbackKey} url={src} playing={!paused} muted={muted} volume={volume} controls={false}

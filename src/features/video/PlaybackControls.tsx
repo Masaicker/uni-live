@@ -15,7 +15,7 @@ interface Props {
   onTogglePaused: () => void;
   onMute: () => void;
   onAudio: (muted: boolean, volume: number) => void;
-  onSeek: (time: number) => boolean;
+  onSeek: (time: number, followingLive?: boolean) => boolean;
   onFullscreen: () => void;
 }
 
@@ -166,7 +166,7 @@ export const PlaybackControls = forwardRef<PlaybackControlsHandle, Props>(functi
         onKeyDown={(event) => {
           if (event.key === "Escape" && frozen.current) { event.preventDefault(); event.stopPropagation(); finish(false); return; }
           const requested = event.key === "Home" ? actual.current.start + 0.1 : event.key === "End" ? actual.current.end - 0.5 : undefined;
-          if (requested !== undefined) { event.preventDefault(); latest.current.onSeek(requested); wake.current(true); }
+          if (requested !== undefined) { event.preventDefault(); latest.current.onSeek(requested, event.key === "End"); wake.current(true); }
         }} />
     </div>
     <div className="playback-buttons">
@@ -177,7 +177,7 @@ export const PlaybackControls = forwardRef<PlaybackControlsHandle, Props>(functi
           onChange={(event) => props.onAudio(Number(event.target.value) === 0, Number(event.target.value))} /></div>
       </div>
       {timeline.live ? <button className={`playback-live ${delay <= 3 && !expired ? "at-live" : ""}`} title="返回直播位置" disabled={!seekable}
-        onClick={() => { if (props.onSeek(actual.current.end - 0.5) && props.paused) props.onTogglePaused(); wake.current(true); }}><span />{expired ? "已过期" : delay <= 3 ? "直播" : `-${mediaTime(delay)}`}</button>
+        onClick={() => { if (props.onSeek(actual.current.end - 0.5, true) && props.paused) props.onTogglePaused(); wake.current(true); }}><span />{expired ? "已过期" : delay <= 3 ? "直播" : `-${mediaTime(delay)}`}</button>
         : <span className="playback-time">{mediaTime(timeline.current)} / {mediaTime(timeline.end)}</span>}
       <div className="playback-details">{props.info}</div>
       <IconButton label={props.fullscreen ? "退出全屏" : "全屏"} onClick={props.onFullscreen}>{props.fullscreen ? <ArrowsIn size={17} /> : <ArrowsOut size={17} />}</IconButton>

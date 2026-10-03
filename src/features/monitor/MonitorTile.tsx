@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChatCircleText, CornersOut, CornersIn, X, DotsThree, ArrowsClockwise, Copy, ArrowSquareOut, WarningCircle, DotsSixVertical } from "@phosphor-icons/react";
 import type { IQnType, MonitorVideo } from "@/types";
@@ -56,6 +56,11 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const { video } = props;
   const latest = useRef(props);
   latest.current = props;
+  const [followingLive, setFollowingLive] = useState(true);
+  const setPaused = useCallback((paused: boolean) => {
+    if (paused) setFollowingLive(false);
+    latest.current.onPaused(paused);
+  }, []);
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [dimensions, setDimensions] = useState("");
@@ -83,6 +88,8 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
   const mediaOptions = timelineOptions(video.stream, video.platform);
   const compact = props.thumbnail && !fullscreen;
+
+  useEffect(() => { setFollowingLive(true); }, [video.stream, video.playbackKey]);
 
   useEffect(() => {
     const update = () => {
@@ -187,7 +194,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       event.preventDefault(); event.stopPropagation(); props.onMute();
       if (fullscreen) showFeedback(video.muted || video.volume === 0 ? "声音开启" : "已静音");
     } else if (event.type === "click" && event.button === 0 && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      event.preventDefault(); event.stopPropagation(); props.onPaused(!video.paused);
+      event.preventDefault(); event.stopPropagation(); setPaused(!video.paused);
       if (fullscreen) showFeedback(video.paused ? "播放" : "暂停");
     }
   };
@@ -197,7 +204,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       const value = latest.current;
       wakeFullscreen.current();
       if (key === " ") {
-        value.onPaused(!value.video.paused);
+        setPaused(!value.video.paused);
         showFeedback(value.video.paused ? "播放" : "暂停");
       } else if (key === "ArrowUp" || key === "ArrowDown") {
         const previous = value.video.muted ? 0 : value.video.volume;
@@ -213,7 +220,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       return true;
     },
     finishSeek: (commit) => playbackControls.current?.finishSeek(commit),
-  }), []);
+  }), [setPaused]);
 
   const secondaryControls = <>
     <IconButton label="刷新直播" disabled={video.isRefreshing} onClick={props.onRefresh}><ArrowsClockwise size={17} className={video.isRefreshing ? "animate-spin" : ""} /></IconButton>
@@ -254,15 +261,20 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       if (event.altKey || event.shiftKey || event.ctrlKey || event.metaKey || (event.target as HTMLElement).closest("button, input, select, a, .playback-controls")) return;
       event.preventDefault(); void toggleFullscreen();
     }}>
-      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} mediaRef={media} timelineOptions={mediaOptions}
+      {video.stream && <PlayerAdapter src={video.stream} playbackKey={video.playbackKey} muted={video.muted} volume={video.volume} paused={video.paused} followingLive={followingLive} mediaRef={media} timelineOptions={mediaOptions}
         onAudioChange={props.onAudio} onError={props.onPlaybackError} onPlay={props.onPlaying} onReady={props.onReady} onPause={() => { if (video.paused) props.onPaused(true); }}
         onTimeline={(timeline) => playbackControls.current?.report(timeline)}
         onReplayExpired={() => showFeedback("较早的缓存已过期，已移到最早可播位置")}
         onDimensions={(w, h) => setDimensions(w && h ? `${w} × ${h}` : "")} />}
       {video.stream && <PlaybackControls ref={playbackControls} key={video.playbackKey} mediaRef={media} paused={video.paused} muted={video.muted} volume={video.volume} fullscreen={fullscreen}
         info={<><span className="playback-quality" title={`${actualQuality}${dimensions ? ` · ${dimensions}` : ""}`}>{actualQuality}{dimensions && <span className="actual-resolution"> · {dimensions}</span>}</span>{video.warning && <span title={video.warning} className="quality-warning"><WarningCircle size={14} /></span>}</>}
-        onTogglePaused={() => props.onPaused(!video.paused)} onMute={props.onMute} onAudio={props.onAudio}
-        onSeek={(time) => media.current ? seekInMedia(media.current, time, mediaOptions) : false}
+        onTogglePaused={() => setPaused(!video.paused)} onMute={props.onMute} onAudio={props.onAudio}
+        onSeek={(time, follow = false) => {
+          const player = media.current;
+          if (!player || !seekInMedia(player, time, mediaOptions)) return false;
+          setFollowingLive(follow);
+          return true;
+        }}
         onFullscreen={() => void toggleFullscreen()} />}
       {!video.stream && <div className="tile-placeholder">
         {video.status === "error" ? <><WarningCircle size={25} /><span>{platformNames[video.platform]} · {video.rid}</span><p>{video.errorMessage || "暂时无法播放"}</p>
