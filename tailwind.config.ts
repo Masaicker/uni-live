@@ -8,16 +8,16 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#111214",
-        surface: "#191B1E",
-        "surface-elevated": "#22252A",
-        accent: "#8AABF5",
-        foreground: "#E8EAED",
-        muted: "#989FA9",
-        border: "#34383F",
-        success: "#89BFA3",
-        warning: "#D5B479",
-        danger: "#DF9292",
+        background: "rgb(var(--background) / <alpha-value>)",
+        surface: "rgb(var(--surface) / <alpha-value>)",
+        "surface-elevated": "rgb(var(--surface-elevated) / <alpha-value>)",
+        accent: "rgb(var(--accent) / <alpha-value>)",
+        foreground: "rgb(var(--foreground) / <alpha-value>)",
+        muted: "rgb(var(--muted) / <alpha-value>)",
+        border: "rgb(var(--border) / <alpha-value>)",
+        success: "rgb(var(--success) / <alpha-value>)",
+        warning: "rgb(var(--warning) / <alpha-value>)",
+        danger: "rgb(var(--danger) / <alpha-value>)",
       },
       fontFamily: {
         sans: ["Segoe UI", "Microsoft YaHei", "system-ui", "sans-serif"],
