@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Play } from "@phosphor-icons/react";
 import type { FollowedRoom } from "@/types";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { RoomAvatar } from "./RoomAvatar";
@@ -85,6 +86,6 @@ export function RoomAvatarButton({ room, watching, menuOpen, status, onToggle, o
       onToggle();
     }}>
     <RoomAvatar url={room.avatarUrl} platform={room.platform} />
-    {watching && <span className="avatar-layout-badge" aria-label="在布局中" />}
+    {watching && <span className="avatar-layout-badge" role="img" aria-label="在布局中" title="已在布局中"><Play size={12} weight="fill" aria-hidden="true" /></span>}
   </button>;
 }

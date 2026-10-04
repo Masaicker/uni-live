@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, Broadcast, Layout, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, X, XSquare } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, Broadcast, Layout, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, X, XSquare, VideoCameraSlash } from "@phosphor-icons/react";
 import type { FollowedRoom, MonitorVideo } from "@/types";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { isPlatformEnabled } from "@/lib/platform-support";
@@ -33,9 +33,10 @@ interface Props {
   onClearHistory: () => void;
   refreshingAll: boolean;
   onRefreshAll: () => void;
+  canArrange: boolean;
   onArrange: () => void;
   onMuteAll: () => void;
-  onClean: () => void;
+  onClean: (kind: "unfollowed" | "offline") => void;
   onExitFocus: () => void;
   onSettings: () => void;
 }
@@ -47,7 +48,7 @@ export function RoomSidebar(props: Props) {
   const [url, setUrl] = useState("");
   const [avatarMenu, setAvatarMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [compactTools, setCompactTools] = useState(false);
-  const [toolsMenu, setToolsMenu] = useState<{ left: number; top: number } | null>(null);
+  const [toolsMenu, setToolsMenu] = useState<{ kind: "tools" | "clean"; left: number; top: number } | null>(null);
   const [editing, setEditing] = useState(false);
   const searchId = useId();
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -81,7 +82,7 @@ export function RoomSidebar(props: Props) {
     const bounds = toolsMenuRef.current.getBoundingClientRect();
     const left = Math.max(12, Math.min(toolsMenu.left, window.innerWidth - bounds.width - 12));
     const top = Math.max(12, Math.min(toolsMenu.top, window.innerHeight - bounds.height - 12));
-    if (left !== toolsMenu.left || top !== toolsMenu.top) setToolsMenu({ left, top });
+    if (left !== toolsMenu.left || top !== toolsMenu.top) setToolsMenu({ ...toolsMenu, left, top });
   }, [toolsMenu]);
   useEffect(() => {
     if (!toolsMenu) return;
@@ -135,13 +136,26 @@ export function RoomSidebar(props: Props) {
     const next = visible[index + (["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1)];
     if (next) props.onReorder(room.id, next.id);
   };
+  const toggleToolsMenu = (kind: "tools" | "clean") => {
+    const button = toolsButtonRef.current;
+    if (!button) return;
+    setAvatarMenu(null);
+    const rect = button.getBoundingClientRect();
+    setToolsMenu(toolsMenu?.kind === kind ? null : { kind, left: rect.right + 8, top: rect.top });
+  };
+  const cleanupActions = [
+    { label: "关闭未关注房间", Icon: Star, count: props.videos.filter((video) => !video.followed).length, onClick: () => props.onClean("unfollowed") },
+    { label: "关闭未开播房间", Icon: VideoCameraSlash, count: props.videos.filter((video) => video.liveStatus === false).length, onClick: () => props.onClean("offline") },
+  ];
+  const canClean = cleanupActions.some((action) => action.count > 0);
   const secondaryTools = [
     { label: "刷新全部直播间", Icon: ArrowsClockwise, disabled: props.refreshingAll || !props.rooms.some((room) => isPlatformEnabled(room.platform)), onClick: props.onRefreshAll, spinning: props.refreshingAll },
-    { label: "整理全部", Icon: Layout, onClick: props.onArrange },
+    { label: "整理全部", Icon: Layout, disabled: !props.canArrange, onClick: props.onArrange },
     { label: "全部静音", Icon: SpeakerSlash, onClick: props.onMuteAll },
-    { label: "清理临时房间并整理", Icon: Broom, disabled: !props.videos.some((video) => !video.followed), onClick: props.onClean },
   ];
-  const toolButtons = secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <IconButton key={label} label={label} disabled={disabled} onClick={onClick}><Icon size={18} className={spinning ? "animate-spin" : ""} /></IconButton>);
+  const toolButtons = <>{secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <IconButton key={label} label={label} disabled={disabled} onClick={onClick}><Icon size={18} className={spinning ? "animate-spin" : ""} /></IconButton>)}
+    <button ref={toolsButtonRef} type="button" className={`icon-button ${toolsMenu?.kind === "clean" ? "is-active" : ""}`} aria-label="清理布局" title="清理布局" aria-haspopup="menu" aria-expanded={toolsMenu?.kind === "clean"} disabled={!canClean} onClick={() => toggleToolsMenu("clean")}><Broom size={18} /></button>
+  </>;
   const persistentTools = <>
     <IconButton label="关闭全部画面" disabled={!props.videos.length} onClick={props.onCloseAll} className="bulk-close-button"><XSquare size={18} /></IconButton>
     <IconButton label="设置" onClick={props.onSettings}><GearSix size={18} /></IconButton>
@@ -155,9 +169,7 @@ export function RoomSidebar(props: Props) {
     </div>)}</div>
     {props.focused && <IconButton label="退出聚焦" onClick={props.onExitFocus}><CornersIn size={18} /></IconButton>}
     {compactTools ? <button ref={toolsButtonRef} type="button" className={`icon-button ${toolsMenu ? "is-active" : ""}`} aria-label="更多操作" title="更多操作" aria-haspopup="menu" aria-expanded={Boolean(toolsMenu)} onClick={() => {
-      setAvatarMenu(null);
-      const rect = toolsButtonRef.current!.getBoundingClientRect();
-      setToolsMenu(toolsMenu ? null : { left: rect.right + 8, top: rect.top });
+      if (toolsMenu) setToolsMenu(null); else toggleToolsMenu("tools");
     }}><DotsThree size={18} /></button> : toolButtons}
     {persistentTools}
   </aside> : <aside className="room-sidebar" aria-label="房间列表">
@@ -220,17 +232,20 @@ export function RoomSidebar(props: Props) {
     {editing && <span className="sr-only" role="status">{draggedRoom ? `正在拖动${roomLabel(draggedRoom)}${dropTarget ? "，松开可放到标记位置" : ""}` : "排序模式已开启"}</span>}
     <footer className="sidebar-footer">{props.focused && <button className="sidebar-exit-focus" onClick={props.onExitFocus}><CornersIn size={15} />退出聚焦<span>Esc</span></button>}<div className="flex items-center justify-between">{tools}</div></footer>
   </aside>;
-  return <>{sidebar}{props.collapsed && compactTools && toolsMenu && createPortal(<div ref={toolsMenuRef} className="room-avatar-menu sidebar-tools-menu" role="menu" aria-label="全局操作" style={{ left: toolsMenu.left, top: toolsMenu.top }} onKeyDown={(event) => {
+  return <>{sidebar}{toolsMenu && createPortal(<div ref={toolsMenuRef} className={`room-avatar-menu sidebar-tools-menu ${toolsMenu.kind === "clean" ? "sidebar-cleanup-menu" : ""}`} role="menu" aria-label={toolsMenu.kind === "clean" ? "清理布局" : "全局操作"} aria-orientation={toolsMenu.kind === "clean" ? "horizontal" : "vertical"} style={{ left: toolsMenu.left, top: toolsMenu.top }} onKeyDown={(event) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setToolsMenu(null); toolsButtonRef.current?.focus(); }
-      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || (toolsMenu.kind === "clean" && ["ArrowLeft", "ArrowRight"].includes(event.key))) {
         event.preventDefault();
         const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-        buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+        buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : buttons.length - 1)) % buttons.length]?.focus();
       }
       if (event.key === "Tab") { setToolsMenu(null); toolsButtonRef.current?.focus(); }
     }}>
-      {secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <button key={label} type="button" role="menuitem" disabled={disabled} onClick={() => { setToolsMenu(null); toolsButtonRef.current?.focus(); onClick(); }}><Icon size={18} className={spinning ? "animate-spin" : ""} /><span>{label}</span></button>)}
+      {toolsMenu.kind === "clean" ? cleanupActions.map(({ label, Icon, count, onClick }) => <button key={label} type="button" role="menuitem" aria-label={`${label}（${count}）`} title={`${label}（${count}）`} disabled={!count} onClick={() => { setToolsMenu(null); toolsButtonRef.current?.focus(); onClick(); }}><Icon size={18} aria-hidden="true" /><span className="sidebar-cleanup-count" aria-hidden="true">{count}</span></button>) : <>
+        {secondaryTools.map(({ label, Icon, disabled, onClick, spinning }) => <button key={label} type="button" role="menuitem" disabled={disabled} onClick={() => { setToolsMenu(null); toolsButtonRef.current?.focus(); onClick(); }}><Icon size={18} className={spinning ? "animate-spin" : ""} /><span>{label}</span></button>)}
+        <button type="button" role="menuitem" disabled={!canClean} aria-haspopup="menu" aria-expanded={false} onClick={() => toggleToolsMenu("clean")} onKeyDown={(event) => { if (event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); toggleToolsMenu("clean"); } }}><Broom size={18} /><span>清理布局</span></button>
+      </>}
     </div>, document.body)}{avatarMenu && selected && createPortal(<div ref={menuRef} className="room-avatar-menu" role="menu" aria-label={`${roomLabel(selected)}房间操作`} style={{ left: avatarMenu.left, top: avatarMenu.top }} onKeyDown={(event) => {
       if (event.key === "Escape") { event.stopPropagation(); setAvatarMenu(null); menuButton.current?.focus(); }
       if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")], index = buttons.indexOf(document.activeElement as HTMLButtonElement); buttons[(index + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : buttons.length - 1)) % buttons.length]?.focus(); }

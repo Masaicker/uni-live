@@ -64,6 +64,18 @@ export function arrangeByPosition(videos: { id: string; layout: VideoLayout }[],
   return Object.fromEntries(slots.map((slot, index) => [videos[owner[index + 1] - 1].id, slot]));
 }
 
+export function needsArrangement(videos: { id: string; layout: VideoLayout }[], size: CanvasSize): boolean {
+  if (size.width < 2 || size.height < 2) return false;
+  const layouts = arrangeByPosition(videos, size);
+  return videos.some(({ id, layout }) => {
+    const target = layouts[id];
+    return Math.abs(layout.x - target.x) * size.width / 100 > .5
+      || Math.abs(layout.y - target.y) * size.height / 100 > .5
+      || Math.abs(layout.w - target.w) * size.width / 100 > .5
+      || Math.abs(layout.h - target.h) * size.height / 100 > .5;
+  });
+}
+
 export function clampRect(rect: VideoLayout, size: CanvasSize): VideoLayout {
   const w = Math.min(100, Math.max(100 * Math.min(160, size.width) / Math.max(1, size.width), rect.w));
   const h = Math.min(100, Math.max(100 * Math.min(90, size.height) / Math.max(1, size.height), rect.h));
