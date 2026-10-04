@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { SquaresFour, SidebarSimple, Plus } from "@phosphor-icons/react";
+import { Broadcast, SidebarSimple, Plus } from "@phosphor-icons/react";
 import type { FollowedRoom, IQnType, MonitorVideo, PlaybackResult, RoomInfo } from "@/types";
 import { apiGetRoomInfo } from "@/apis";
 import { RoomSidebar } from "./RoomSidebar";
@@ -490,7 +490,7 @@ export function LiveRoomClient(share: LegacyShare) {
           onFollowingLive={(id, followingLive) => changePlaybackIntent(id, { followingLive })}
           onReady={(id, key) => { const video = current.current.videos.find((video) => video.id === id); if (video?.playbackKey === key && video.paused) send({ type: "video", id, patch: { status: "playing", errorMessage: undefined } }); }}
           onPlaying={(id, key) => send({ type: "playing", id, key, at: Date.now() })} />
-          : <div className="workspace-empty"><div className="empty-icon"><SquaresFour size={30} weight="light" /></div>
+          : <div className="workspace-empty"><div className="empty-icon"><Broadcast size={30} weight="light" /></div>
             <span className="empty-eyebrow">YOUR LIVE DESK</span><h1>把喜欢的直播，放在一起</h1>
             <button className="primary-button" onClick={() => { if (mobile) setDrawer(true); else setCollapsed(false); requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[aria-label="直播间地址"]')?.focus()); }}><Plus size={17} />添加第一个房间</button>
           </div>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChatCircleText, CornersOut, CornersIn, X, DotsThree, ArrowsClockwise, Copy, ArrowSquareOut, WarningCircle, DotsSixVertical, User } from "@phosphor-icons/react";
 import type { IQnType, MonitorVideo } from "@/types";
@@ -65,6 +65,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const [dimensions, setDimensions] = useState("");
   const playbackControls = useRef<PlaybackControlsHandle>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [narrow, setNarrow] = useState(false);
   const [idle, setIdle] = useState(false);
   const wakeControls = useRef<() => void>(() => {});
   const [touchActive, setTouchActive] = useState(false);
@@ -88,7 +89,16 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const audible = !video.muted && video.volume > 0 && !video.paused && video.status === "playing";
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
   const mediaOptions = timelineOptions(video.stream, video.platform);
-  const compact = props.thumbnail && !fullscreen;
+  const compact = (props.thumbnail && !fullscreen) || narrow;
+
+  useLayoutEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    setNarrow(node.clientWidth <= 280);
+    const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width <= 280));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const update = () => {
@@ -270,7 +280,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
     </IconButton>
   </>;
 
-  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${compact ? "is-compact-thumbnail" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${idle ? "is-idle" : ""}`}
+  return <section ref={root} className={`monitor-tile ${props.hovered ? "is-room-hovered" : ""} ${props.focused ? "is-focused" : ""} ${props.thumbnail ? "is-thumbnail" : ""} ${compact ? "is-compact" : ""} ${audible ? "is-audible" : ""} ${video.paused ? "is-paused" : ""} ${menu ? "is-menu-open" : ""} ${touchActive ? "is-touch-active" : ""} ${idle ? "is-idle" : ""}`}
     aria-label={roomLabel(video)} data-room-id={video.id} data-platform={video.platform} data-muted={video.muted} data-audible={audible} data-focused={props.focused} data-room-idle={idle} data-playback-key={video.playbackKey} data-danmaku-status={comments.status}
     onPointerDownCapture={intercept} onClickCapture={intercept}
     onPointerDown={(event) => { if (event.pointerType === "touch") setTouchActive(true); }}

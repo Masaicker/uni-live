@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, XSquare } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, Broadcast, Layout, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, X, XSquare } from "@phosphor-icons/react";
 import type { FollowedRoom, MonitorVideo } from "@/types";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { isPlatformEnabled } from "@/lib/platform-support";
@@ -43,11 +43,15 @@ interface Props {
 export function RoomSidebar(props: Props) {
   const [tab, setTab] = useState<"followed" | "history">("followed");
   const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [avatarMenu, setAvatarMenu] = useState<{ id: string; left: number; top: number } | null>(null);
   const [compactTools, setCompactTools] = useState(false);
   const [toolsMenu, setToolsMenu] = useState<{ left: number; top: number } | null>(null);
   const [editing, setEditing] = useState(false);
+  const searchId = useId();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement | null>(null);
@@ -64,6 +68,7 @@ export function RoomSidebar(props: Props) {
   const draggedRoom = props.rooms.find((room) => room.id === dragged);
 
   useEffect(() => { setAvatarMenu(null); setToolsMenu(null); setEditing(false); }, [tab, props.view, props.collapsed]);
+  useEffect(() => { if (searchOpen && !props.collapsed) searchInputRef.current?.focus(); }, [searchOpen, props.collapsed]);
   useEffect(() => {
     const height = window.matchMedia("(max-height: 640px)");
     const update = () => { setCompactTools(height.matches); setToolsMenu(null); };
@@ -109,6 +114,7 @@ export function RoomSidebar(props: Props) {
   }, [avatarMenu]);
 
   const submit = async () => { if (!url.trim()) return; const result = await props.onAdd(url); if (result) { setUrl(""); if (result === "history") setTab("history"); } };
+  const closeSearch = () => { setQuery(""); setSearchOpen(false); searchButtonRef.current?.focus(); };
   const toggleAvatarRoom = (id: string) => {
     if (editing) return;
     setAvatarMenu(null);
@@ -131,7 +137,7 @@ export function RoomSidebar(props: Props) {
   };
   const secondaryTools = [
     { label: "刷新全部直播间", Icon: ArrowsClockwise, disabled: props.refreshingAll || !props.rooms.some((room) => isPlatformEnabled(room.platform)), onClick: props.onRefreshAll, spinning: props.refreshingAll },
-    { label: "整理全部", Icon: SquaresFour, onClick: props.onArrange },
+    { label: "整理全部", Icon: Layout, onClick: props.onArrange },
     { label: "全部静音", Icon: SpeakerSlash, onClick: props.onMuteAll },
     { label: "清理临时房间并整理", Icon: Broom, disabled: !props.videos.some((video) => !video.followed), onClick: props.onClean },
   ];
@@ -155,18 +161,27 @@ export function RoomSidebar(props: Props) {
     }}><DotsThree size={18} /></button> : toolButtons}
     {persistentTools}
   </aside> : <aside className="room-sidebar" aria-label="房间列表">
-    <header className="sidebar-header"><div className="brand-mark"><SquaresFour size={20} /><span>多看</span></div><IconButton label="收起房间列表" onClick={() => props.onCollapse(true)}><CaretLeft size={18} /></IconButton></header>
+    <header className="sidebar-header"><div className="brand-mark"><Broadcast size={20} weight="fill" /><span>多看</span></div><IconButton label="收起房间列表" onClick={() => props.onCollapse(true)}><CaretLeft size={18} /></IconButton></header>
     <div className="sidebar-inputs">
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }} className="flex gap-2">
         <input aria-label="直播间地址" className="text-input min-w-0 flex-1" placeholder="粘贴直播间地址" value={url} onChange={(event) => setUrl(event.target.value)} autoComplete="off" />
         <button type="submit" className="add-room-button" aria-label="添加直播间" title="验证并添加房间" disabled={props.adding || !url.trim()}><Plus size={18} className={props.adding ? "animate-spin" : ""} /></button>
       </form>
-      <label className="search-input"><MagnifyingGlass size={16} /><input aria-label="搜索房间" placeholder="搜索主播或房间" value={query} onChange={(event) => { setQuery(event.target.value); setEditing(false); clearDrag(); }} /></label>
     </div>
-    <nav className="library-tabs" aria-label="房间分类">
-      <button aria-current={tab === "followed" ? "page" : undefined} onClick={() => setTab("followed")}><Star size={14} />关注<span>{followed.length}</span></button>
-      <button aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><ClockCounterClockwise size={14} />历史<span>{history.length}</span></button>
-    </nav>
+    <div onKeyDown={(event) => {
+      if (searchOpen && event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); closeSearch(); }
+    }}>
+      <nav className="library-tabs" aria-label="房间分类">
+        <button aria-current={tab === "followed" ? "page" : undefined} onClick={() => setTab("followed")}><Star size={14} />关注<span>{followed.length}</span></button>
+        <button aria-current={tab === "history" ? "page" : undefined} onClick={() => setTab("history")}><ClockCounterClockwise size={14} />历史<span>{history.length}</span></button>
+        <button ref={searchButtonRef} type="button" className={`icon-button library-search-button ${searchOpen ? "is-active" : ""}`} aria-label="搜索当前列表" title="搜索当前列表" aria-expanded={searchOpen} aria-controls={searchId} onClick={() => { if (searchOpen) closeSearch(); else setSearchOpen(true); }}><MagnifyingGlass size={16} /></button>
+      </nav>
+      {searchOpen && <div id={searchId} className="sidebar-library-search">
+        <div className="search-input"><MagnifyingGlass size={16} /><input ref={searchInputRef} aria-label="搜索房间" placeholder="主播名 / 房间号" value={query} autoComplete="off" onChange={(event) => { setQuery(event.target.value); setEditing(false); clearDrag(); }} />
+          <IconButton label="清空搜索" disabled={!query} onClick={() => { setQuery(""); searchInputRef.current?.focus(); }}><X size={14} /></IconButton>
+        </div>
+      </div>}
+    </div>
     <div className="sidebar-section-label"><span>{tab === "followed" ? "关注房间" : "最近访问"}</span>
       <div className="library-view-tools">
         {tab === "followed" ? <button type="button" className={`sort-mode-button ${editing ? "is-active" : ""}`} aria-pressed={editing} disabled={!editing && (Boolean(query) || followed.length < 2)} onClick={() => { setEditing(!editing); setAvatarMenu(null); clearDrag(); }}>{editing ? <Check size={13} /> : <DotsSixVertical size={13} />}{editing ? "完成排序" : "编辑排序"}</button>
@@ -174,7 +189,6 @@ export function RoomSidebar(props: Props) {
         {tab === "followed" && <IconButton label={props.view === "avatars" ? "切换为列表视图" : "切换为头像视图"} disabled={editing} onClick={() => props.onViewChange(props.view === "avatars" ? "list" : "avatars")}>{props.view === "avatars" ? <List size={16} /> : <SquaresFour size={16} />}</IconButton>}
       </div>
     </div>
-    {editing && <p className="sort-mode-hint">拖动时可用滚轮，靠近边缘加速滚动；也可用方向键或上下按钮，Esc 取消拖动。</p>}
     <div ref={listRef} className="room-list" data-sorting={editing} data-dragging={Boolean(dragged)}>
       {visible.length === 0 ? <div className="sidebar-empty">{tab === "followed" ? <Star size={24} /> : <ClockCounterClockwise size={24} />}<p>{query ? "没有找到这个房间" : tab === "followed" ? "把常看的主播留在这里" : "最近添加或观看的房间会在这里"}</p><span>{query ? "尝试主播名或房间号" : tab === "followed" ? "点击画面标题栏的星标，添加关注" : "确认房间存在后自动记录，未开播也可关注"}</span></div>
       : <div className={avatarView ? "room-avatar-grid" : undefined}>{visible.map((room) => {
