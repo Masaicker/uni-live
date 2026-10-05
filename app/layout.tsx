@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "多看",
-  description: "把喜欢的直播，放在一起。支持斗鱼、虎牙多画面观看。",
+  description: "把喜欢的直播，放在一起。支持斗鱼多画面观看。",
 };
 
 export const viewport: Viewport = {

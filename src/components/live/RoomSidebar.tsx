@@ -3,7 +3,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CaretLeft, CaretRight, Plus, MagnifyingGlass, GearSix, Broadcast, Layout, SquaresFour, SpeakerSlash, Play, Stop, Star, Trash, ArrowsClockwise, ClockCounterClockwise, Broom, CornersIn, List, DotsSixVertical, DotsThree, Check, ArrowUp, ArrowDown, X, XSquare, VideoCameraSlash } from "@phosphor-icons/react";
-import type { FollowedRoom, MonitorVideo } from "@/types";
+import type { FollowedRoom, MonitorVideo, Platform } from "@/types";
 import { platformNames, roomLabel } from "@/lib/room-identity";
 import { isPlatformEnabled } from "@/lib/platform-support";
 import { followedRooms, watchingHistory } from "@/features/monitor/library";
@@ -12,6 +12,8 @@ import { RoomAvatar } from "./RoomAvatar";
 import { RoomAvatarButton } from "./RoomAvatarButton";
 import { FollowButton } from "./FollowButton";
 import { useRoomSortDrag } from "./useRoomSortDrag";
+
+const platformLogos: Partial<Record<Platform, string>> = { douyu: "/platform-logos/douyu.svg" };
 
 interface Props {
   rooms: FollowedRoom[];
@@ -207,15 +209,18 @@ export function RoomSidebar(props: Props) {
           const video = props.videos.find((item) => item.id === room.id);
           const liveStatus = room.liveStatus === true ? "直播中" : room.liveStatus === false ? "未开播" : "状态未知";
           const playbackStatus = video?.status === "error" ? "连接失败" : video?.status === "loading" || video?.isRefreshing ? "连接中" : video ? video.paused ? "已暂停" : "在布局中" : "";
+          const status = `${liveStatus}${playbackStatus ? ` · ${playbackStatus}` : ""}`;
           const dropEdge = dropTarget?.id === room.id ? dropTarget.edge : undefined;
           const dragClass = dragged === room.id ? "is-dragging" : "";
           if (avatarView) return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} className={`room-avatar-item ${props.hoveredId === room.id ? "is-room-hovered" : ""} ${room.liveStatus === true ? "is-live" : ""} ${video ? "is-watching" : ""}`}>
-            <RoomAvatarButton room={room} watching={Boolean(video)} menuOpen={avatarMenu?.id === room.id} status={`${liveStatus}${playbackStatus ? ` · ${playbackStatus}` : ""}`} onToggle={() => toggleAvatarRoom(room.id)} onMenu={(button) => openAvatarMenu(button, room)} />
+            <RoomAvatarButton room={room} watching={Boolean(video)} menuOpen={avatarMenu?.id === room.id} status={status} onToggle={() => toggleAvatarRoom(room.id)} onMenu={(button) => openAvatarMenu(button, room)} />
           </div>;
+          const platformLogo = platformLogos[room.platform];
           return <div key={room.id} data-library-room={room.id} data-live-status={String(room.liveStatus)} data-drop-edge={dropEdge} className={`room-list-item ${props.hoveredId === room.id ? "is-room-hovered" : ""} ${video ? "is-watching" : ""} ${dragClass}`}>
+            {platformLogo && <span className="room-platform-watermark" aria-hidden="true" style={{ maskImage: `url("${platformLogo}")`, WebkitMaskImage: `url("${platformLogo}")` }} />}
             <div className="flex items-center gap-2">
               {editing && <button type="button" className="sort-handle" data-sort-handle aria-label={`拖动排序：${roomLabel(room)}`} title="拖动时可用滚轮；方向键排序" onPointerDown={(event) => beginDrag(event, room.id)} onKeyDown={(event) => sortKeys(event, room)}><DotsSixVertical size={15} /></button>}
-              <button type="button" className="room-open-button" onClick={() => { if (!editing) props.onOpen(room.id); }} title={room.title || roomLabel(room)}><RoomAvatar url={room.avatarUrl} platform={room.platform} /><span className="min-w-0 flex-1"><span className="room-name">{roomLabel(room)}</span></span></button>
+              <button type="button" className="room-open-button" onClick={() => { if (!editing) props.onOpen(room.id); }} aria-label={`${roomLabel(room)} · ${platformNames[room.platform]} · ${status}`} title={`${room.title || roomLabel(room)} · ${platformNames[room.platform]} · ${status}`}><RoomAvatar url={room.avatarUrl} platform={room.platform} /><span className="min-w-0 flex-1"><span className="room-name">{roomLabel(room)}</span><span className="room-subtitle">{playbackStatus}</span></span></button>
               {editing ? <div className="sort-move-buttons">
                 <IconButton label={`上移：${roomLabel(room)}`} disabled={visible[0]?.id === room.id} onClick={() => props.onReorder(room.id, visible[visible.indexOf(room) - 1].id)}><ArrowUp size={14} /></IconButton>
                 <IconButton label={`下移：${roomLabel(room)}`} disabled={visible[visible.length - 1]?.id === room.id} onClick={() => props.onReorder(room.id, visible[visible.indexOf(room) + 1].id)}><ArrowDown size={14} /></IconButton>
@@ -225,7 +230,6 @@ export function RoomSidebar(props: Props) {
                 {tab === "history" && <IconButton label="删除历史记录" danger onClick={() => props.onForget(room.id)}><Trash size={15} /></IconButton>}
               </>}
             </div>
-            <div className="room-subtitle"><span className={`status-dot ${room.liveStatus === true ? "is-live" : ""}`} /><span>{platformNames[room.platform]} · {liveStatus}</span>{playbackStatus && <span>· {playbackStatus}</span>}</div>
           </div>;
         })}</div>}
     </div>

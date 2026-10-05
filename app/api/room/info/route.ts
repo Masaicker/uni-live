@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getDouyuRoom } from "@/lib/reallive/douyu/realrid";
 import { getRealRid_Bilibili } from "@/lib/reallive/bilibili/realrid";
 import type { RoomInfo } from "@/types";
-import { BILIBILI_DISABLED_MESSAGE, isPlatformEnabled } from "@/lib/platform-support";
+import { BILIBILI_DISABLED_MESSAGE, HUYA_DISABLED_MESSAGE, isPlatformEnabled } from "@/lib/platform-support";
 
 const options = { proxy: false as const, timeout: 10000, headers: { "User-Agent": "Mozilla/5.0", Referer: "https://www.douyu.com/" } };
 
@@ -11,6 +11,7 @@ export async function POST(request: Request) {
   try {
     const { platform, rid } = await request.json();
     if (platform === "bilibili" && !isPlatformEnabled(platform)) return NextResponse.json({ error: BILIBILI_DISABLED_MESSAGE }, { status: 503 });
+    if (platform === "huya" && !isPlatformEnabled(platform)) return NextResponse.json({ error: HUYA_DISABLED_MESSAGE }, { status: 503 });
     if (!["douyu", "bilibili", "huya"].includes(platform) || typeof rid !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(rid)) {
       return NextResponse.json({ error: "房间地址不正确" }, { status: 400 });
     }

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getRealLive_Huya } from "@/lib/reallive/huya/reallive";
 import type { IStreamType } from "@/types";
+import { HUYA_DISABLED_MESSAGE, isPlatformEnabled } from "@/lib/platform-support";
 
 export async function POST(request: Request) {
+  if (!isPlatformEnabled("huya")) return NextResponse.json({ stream: "", error: HUYA_DISABLED_MESSAGE }, { status: 503 });
   try {
     const { rid, type } = (await request.json()) as { rid: string; type?: IStreamType };
     if (typeof rid !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(rid) || (type !== undefined && !["flv", "hls"].includes(type))) return NextResponse.json({ stream: "", error: "虎牙房间号或播放格式不正确" }, { status: 400 });
