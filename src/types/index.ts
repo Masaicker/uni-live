@@ -66,7 +66,7 @@ export interface MonitorVideo extends FollowedRoom {
   lastPlayedKey?: number;
 }
 
-export interface FocusSession {
+export interface ViewingSession {
   id: string;
   muted: boolean;
   volume: number;
@@ -77,12 +77,16 @@ export interface FocusSession {
   autoDanmaku: boolean;
 }
 
+export interface FocusSession extends ViewingSession {
+  order: string[];
+}
+
 export interface MonitorState {
   rooms: FollowedRoom[];
   videos: MonitorVideo[];
   manual: boolean;
   focus: FocusSession | null;
-  fullscreen: FocusSession | null;
+  fullscreen: ViewingSession | null;
 }
 
 export interface WorkspaceSnapshot {

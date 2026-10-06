@@ -54,9 +54,15 @@ function enterViewingMode(state: MonitorState, kind: "focus" | "fullscreen", id:
   const target = videos.find((video) => video.id === id);
   if (!target) return state;
   // Switching modes extends the same temporary audio session, including manual changes.
-  const session = sameRoom ? { ...previous!, autoAudio, autoDanmaku } : { id, muted: target.muted, volume: target.volume, adjusted: false, autoAudio,
-    danmakuEnabled: target.danmakuEnabled, danmakuAdjusted: false, autoDanmaku };
-  return { ...state, focus: kind === "focus" ? session : null, fullscreen: kind === "fullscreen" ? session : null,
+  const session = { id, muted: sameRoom ? previous!.muted : target.muted, volume: sameRoom ? previous!.volume : target.volume,
+    adjusted: sameRoom ? previous!.adjusted : false, autoAudio, danmakuEnabled: sameRoom ? previous!.danmakuEnabled : target.danmakuEnabled,
+    danmakuAdjusted: sameRoom ? previous!.danmakuAdjusted : false, autoDanmaku };
+  const focused = state.focus;
+  // Focus swaps own a temporary order; ordinary layouts and their saved order stay untouched.
+  const focus = kind === "focus" ? { ...session, order: focused
+    ? focused.order.map((roomId) => roomId === id ? focused.id : roomId === focused.id ? id : roomId)
+    : videos.map((video) => video.id) } : null;
+  return { ...state, focus, fullscreen: kind === "fullscreen" ? session : null,
     videos: videos.map((video) => video.id === id ? { ...video, paused: false,
       ...(!session.adjusted ? { muted: autoAudio ? false : session.muted, volume: autoAudio ? video.volume || video.lastVolume || 0.5 : session.volume } : {}),
       ...(!session.danmakuAdjusted ? { danmakuEnabled: autoDanmaku || session.danmakuEnabled } : {}),
@@ -119,13 +125,14 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
       return !room || !isPlatformEnabled(room.platform) || state.videos.some((v) => v.id === action.id) ? state : {
         ...state, rooms: state.rooms.map((r) => r.id === action.id ? { ...r, layout: action.layout } : r),
         videos: [...state.videos, createVideo(room, action.layout)],
+        focus: state.focus ? { ...state.focus, order: [...state.focus.order, action.id] } : null,
       };
     }
     case "close": case "remove": {
       const videos = state.videos.filter((v) => v.id !== action.id);
       return { ...state,
         rooms: retainRooms(action.type === "remove" ? state.rooms.filter((r) => r.id !== action.id) : state.rooms, videos.map((v) => v.id)),
-        videos, focus: state.focus?.id === action.id ? null : state.focus,
+        videos, focus: state.focus ? state.focus.id === action.id ? null : { ...state.focus, order: state.focus.order.filter((id) => id !== action.id) } : null,
         fullscreen: state.fullscreen?.id === action.id ? null : state.fullscreen,
       };
     }
@@ -133,13 +140,16 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
     case "restore-closed": {
       const rooms = [...state.rooms];
       const videos = [...state.videos];
+      const restoredIds: string[] = [];
       for (const saved of action.rooms) {
         if (!isPlatformEnabled(saved.platform) || videos.some((video) => video.id === saved.id)) continue;
         let room = rooms.find((room) => room.id === saved.id);
         if (!room) { room = saved; rooms.push(room); }
         videos.push(createVideo(room, saved.layout));
+        restoredIds.push(room.id);
       }
-      return { ...state, rooms, videos, manual: action.manual };
+      return { ...state, rooms, videos, manual: action.manual,
+        focus: state.focus && restoredIds.length ? { ...state.focus, order: [...state.focus.order, ...restoredIds] } : state.focus };
     }
     case "room": return updateRoom(state, action.id, action.patch);
     case "video": return state.videos.some((v) => v.id === action.id && changes(v, action.patch))

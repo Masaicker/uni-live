@@ -492,7 +492,7 @@ export function LiveRoomClient(share: LegacyShare) {
         onKeyDown={(event) => {
           if (event.key.toLowerCase() === "r" && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !settings && !(event.target as HTMLElement).closest("input, textarea, select, [contenteditable], [role='dialog'], [role='menu']")) { event.preventDefault(); arrange(); }
         }}>
-        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} hoveredId={sidebarHoveredId} onControlRef={controlRef} size={size} danmaku={danmaku}
+        {state.videos.length ? <MonitorCanvas videos={state.videos} focusedId={state.focus?.id ?? null} focusOrder={state.focus?.order ?? null} hoveredId={sidebarHoveredId} onControlRef={controlRef} size={size} danmaku={danmaku}
           onFullscreenChange={(id, active) => send({ type: "fullscreen", id, active, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })}
           onLayout={(id, layout) => send({ type: "layout", id, layout })} onRaise={(id) => send({ type: "raise", id })} onFocus={(id) => send({ type: "focus", id, autoAudio: autoFocusAudio, autoDanmaku: autoFocusDanmaku })} onMute={toggleMute}
           onAudio={(id, muted, volume) => send({ type: "audio", id, muted, volume })} onClose={stopWatching} onRefresh={refresh}

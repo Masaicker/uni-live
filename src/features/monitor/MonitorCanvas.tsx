@@ -11,6 +11,7 @@ import type { RecoveryEvent, RecoveryPreferences } from "@/features/video/playba
 interface Props {
   videos: MonitorVideo[];
   focusedId: string | null;
+  focusOrder: string[] | null;
   hoveredId: string | null;
   onControlRef: (id: string, handle: MonitorTileHandle | null) => void;
   size: CanvasSize;
@@ -39,7 +40,7 @@ export function MonitorCanvas(props: Props) {
   actions.current = props;
   const drag = useRef<{ id: string; x: number; y: number; origin: VideoLayout; handle?: ResizeHandle } | null>(null);
   const [scroll, setScroll] = useState<Record<Rail, number>>({ left: 0, right: 0, top: 0, bottom: 0 });
-  const focus = props.focusedId ? focusLayouts(props.videos.map((v) => v.id), props.focusedId, props.size, scroll) : null;
+  const focus = props.focusedId ? focusLayouts(props.focusOrder ?? props.videos.map((v) => v.id), props.focusedId, props.size, scroll) : null;
   const begin = useCallback((event: React.PointerEvent, video: MonitorVideo, handle?: ResizeHandle) => {
     if (actions.current.focusedId || event.button !== 0 || event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) return;
     if (!handle && (event.target as HTMLElement).closest("button, input, select, a")) return;
@@ -102,7 +103,10 @@ const MonitorPosition = memo(function MonitorPosition({ video, focused, thumbnai
     <MonitorTile ref={controlRef} video={video} focused={focused} thumbnail={thumbnail} hovered={hovered} danmaku={danmaku}
       onFullscreenChange={(active) => actions.current.onFullscreenChange(video.id, active)}
       onDrag={(event) => begin(event, video)} onResize={(event, handle) => begin(event, video, handle)}
-      onFocus={() => { resetScroll({ left: 0, right: 0, top: 0, bottom: 0 }); actions.current.onFocus(video.id); }}
+      onFocus={() => {
+        if (!actions.current.focusedId) resetScroll({ left: 0, right: 0, top: 0, bottom: 0 });
+        actions.current.onFocus(video.id);
+      }}
       onMute={() => actions.current.onMute(video.id)} onAudio={(muted, volume) => actions.current.onAudio(video.id, muted, volume)}
       onClose={() => actions.current.onClose(video.id)} onRefresh={() => actions.current.onRefresh(video.id)} onQuality={(rate, qn) => actions.current.onRefresh(video.id, rate, qn ?? "原画")}
       onDanmaku={() => actions.current.onDanmaku(video.id)} onFollow={(followed) => actions.current.onFollow(video.id, followed)}
