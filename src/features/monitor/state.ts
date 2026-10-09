@@ -63,7 +63,7 @@ function enterViewingMode(state: MonitorState, kind: "focus" | "fullscreen", id:
     ? focused.order.map((roomId) => roomId === id ? focused.id : roomId === focused.id ? id : roomId)
     : videos.map((video) => video.id) } : null;
   return { ...state, focus, fullscreen: kind === "fullscreen" ? session : null,
-    videos: videos.map((video) => video.id === id ? { ...video, paused: false,
+    videos: videos.map((video) => video.id === id ? { ...video,
       ...(!session.adjusted ? { muted: autoAudio ? false : session.muted, volume: autoAudio ? video.volume || video.lastVolume || 0.5 : session.volume } : {}),
       ...(!session.danmakuAdjusted ? { danmakuEnabled: autoDanmaku || session.danmakuEnabled } : {}),
     } : video) };
@@ -206,7 +206,7 @@ export function monitorReducer(state: MonitorState, action: MonitorAction): Moni
         const sessions = [focus, fullscreen].filter((session) => session?.id === video.id);
         const baseline = sessions[0];
         if (!baseline || sessions.some((session) => session?.adjusted)) return video;
-        return { ...video, muted: action.enabled ? false : baseline.muted, volume: action.enabled ? baseline.volume || video.lastVolume || 0.5 : baseline.volume, ...(action.enabled ? { paused: false } : {}) };
+        return { ...video, muted: action.enabled ? false : baseline.muted, volume: action.enabled ? baseline.volume || video.lastVolume || 0.5 : baseline.volume };
       }) };
     }
     case "danmaku-policy": {
