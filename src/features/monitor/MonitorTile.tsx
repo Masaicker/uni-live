@@ -88,6 +88,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
   const nobleLabel = nobleCount === null ? "—" : nobleCount.toLocaleString("en-US");
   const audible = !video.muted && video.volume > 0 && !video.paused && video.status === "playing";
   const actualQuality = video.selectedQuality?.name ?? (video.platform === "douyu" ? "画质待确认" : video.platform === "bilibili" ? video.qnName : "自动");
+  const yubaUrl = video.platform === "douyu" && /^[1-9]\d*$/.test(video.rid) ? `https://yuba.douyu.com/api/dy/anchor/anchorTopic?room_id=${encodeURIComponent(video.rid)}` : null;
   const mediaOptions = timelineOptions(video.stream, video.platform);
   const compact = (props.thumbnail && !fullscreen) || narrow;
 
@@ -353,6 +354,7 @@ export const MonitorTile = forwardRef<MonitorTileHandle, Props>(function Monitor
       <button onClick={async () => setCopyStatus(await copyText(video.stream) ? "播放地址已复制" : "复制失败，请检查剪贴板权限")} disabled={!video.stream}><Copy size={16} />复制播放地址</button>
       <button onClick={async () => setCopyStatus(await copyText(video.url) ? "直播间地址已复制" : "复制失败，请检查剪贴板权限")}><Copy size={16} />复制直播间地址</button>
       <a href={video.url} target="_blank" rel="noreferrer"><ArrowSquareOut size={16} />打开原始直播间</a>
+      {yubaUrl && <a href={yubaUrl} target="_blank" rel="noreferrer"><ArrowSquareOut size={16} />打开主播鱼吧</a>}
       {copyStatus && <p role="status">{copyStatus}</p>}
       {video.warning && <p className="text-warning">{video.warning}</p>}
       {comments.connectionStatus === "error" && <button onClick={comments.retry}><ChatCircleText size={16} />{video.platform === "douyu" ? "重试贵宾与弹幕连接" : "重试弹幕连接"}</button>}
